@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: patient-engagement-backend
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: JWT_SECRET_KEY
+        value: your-secret-key-change-this-in-render-dashboard
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///./patient_engagement.db
+      - key: API_BASE_URL
+        fromService:
+          type: web
+          name: patient-engagement-backend
+          property: url
+      - key: APP_PORT
+        value: "10000"
+
+  - type: web
+    name: patient-engagement-frontend
+    runtime: node
+    plan: free
+    buildCommand: cd frontend && npm install && npm run build
+    startCommand: npm run preview
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: patient-engagement-backend
+          property: url

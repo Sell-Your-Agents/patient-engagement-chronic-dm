@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -X GET http://localhost:8000/api/analytics/kpis -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzg4NDkzNDA3fQ.V3kIFdZ4etVcXyU1me4LinyntMpUeSjvujmW4R29i9g')",
+      "Bash(curl -s -X GET http://localhost:8000/api/analytics/kpis -H 'Authorization: Bearer __TRACKED_VAR__')",
+      "Bash(python -m py_compile app/services/twilio_service.py app/routers/twilio_webhook.py)",
+      "Bash(git init *)",
+      "Bash(git config *)"
+    ]
+  }
+}
