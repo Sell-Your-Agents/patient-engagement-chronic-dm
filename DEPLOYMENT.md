@@ -21,6 +21,27 @@ npm install
 npm run dev  # Start at http://localhost:5173
 ```
 
+### Public Tunnel (ngrok) — required for voice calls
+Twilio must reach the backend over a public HTTPS URL to fetch call instructions (`/twilio/twiml`), stream audio (`/twilio/stream/{call_sid}`) and post status updates (`/twilio/status`). Keep this running in a third terminal while making calls:
+
+```bash
+# One-time setup
+winget install ngrok.ngrok
+ngrok config add-authtoken <your-ngrok-authtoken>   # from dashboard.ngrok.com
+
+# Each session (use your free static domain from dashboard.ngrok.com → Domains)
+ngrok http --url=<your-domain>.ngrok-free.dev 8000
+```
+
+Then set the same URL in `backend/.env` and restart the backend:
+```
+API_BASE_URL=https://<your-domain>.ngrok-free.dev
+```
+
+With a static domain, `.env` only needs setting once. If you use a tunnel whose URL changes on every run (e.g. `cloudflared tunnel --url http://localhost:8000`), update `API_BASE_URL` and restart the backend each time.
+
+Verify: open `https://<your-domain>.ngrok-free.dev/health` in a browser, and watch Twilio's requests at **http://localhost:4040** during a call.
+
 Visit **http://localhost:5173** and login with:
 - Email: `test@hospital.com`
 - Password: `TestPass123!`
@@ -155,9 +176,19 @@ Demo data includes:
 - 1 demo care team user
 
 ### Voice Testing
-Requires valid Twilio credentials (set in `.env`). Without them:
-- `/api/outreach-calls/initiate` creates a record but fails at Twilio step
+Requires valid Twilio credentials in `.env` **and** a running public tunnel (see [Public Tunnel](#public-tunnel-ngrok--required-for-voice-calls)). Without Twilio credentials:
+- `/api/outreach-calls/initiate` creates a mock completed call record (no real dial)
 - All other endpoints work without Twilio
+
+### Troubleshooting Calls
+| Symptom | Cause | Fix |
+|---|---|---|
+| Phone rings, plays "an application error has occurred", hangs up after a few seconds | Tunnel offline. Twilio gets 404 `ERR_NGROK_3200` on `/twilio/twiml` (Twilio error **11200**) | Start ngrok (see above) |
+| Twilio error **15003** / HTTP 502 or 530 on `/twilio/status` | `API_BASE_URL` points to an expired tunnel URL | Update `API_BASE_URL` in `.env`, restart backend |
+| No `POST /twilio/twiml` in `backend/logs/app.log` | Twilio cannot reach the backend | Check `https://<your-domain>/health` and the ngrok inspector at `localhost:4040` |
+| `UnicodeEncodeError: 'charmap' codec` in backend log | Emoji in `print()` on the Windows console | Run `set PYTHONUTF8=1` (cmd) or `$env:PYTHONUTF8=1` (PowerShell) before `python run.py` |
+
+Twilio error details: Twilio Console → Monitor → Logs → Errors.
 
 ---
 
@@ -182,6 +213,7 @@ Requires valid Twilio credentials (set in `.env`). Without them:
 
 - **Swagger Docs**: `http://localhost:8000/docs`
 - **Frontend**: `http://localhost:5173` (dev mode auto-reload)
+- **ngrok inspector**: `http://localhost:4040` (Twilio webhook requests)
 - **Logs**: Check terminal output for detailed request/response logs
 - **Demo credentials**: `test@hospital.com` / `TestPass123!`
 
