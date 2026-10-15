@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.models.clinic import ClinicCall, MissedCall
 from app.services.stt_service import SarvamStream
 from app.services.audio_utils import decode_twilio_payload
+from app.services.public_url import public_request_url, public_ws_url
 from app.services.clinic_agent import ClinicCallSession, build_clinic_prompt, finalize_clinic_call
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ async def _get_call(db: AsyncSession, call_sid: str):
 async def clinic_twiml(request: Request, db: AsyncSession = Depends(get_db)):
     """Twilio asks what to do once the patient picks up: stream audio to our websocket."""
     form_data = await request.form()
-    if not validator.validate(str(request.url), dict(form_data), request.headers.get("X-Twilio-Signature", "")):
+    if not validator.validate(public_request_url(request), dict(form_data), request.headers.get("X-Twilio-Signature", "")):
         logger.warning("❌ Invalid Twilio signature (clinic twiml)")
         return PlainTextResponse("Unauthorized", status_code=403)
 
@@ -52,9 +53,8 @@ async def clinic_twiml(request: Request, db: AsyncSession = Depends(get_db)):
     clinic_call.started_at = datetime.utcnow()
     await db.commit()
 
-    host = request.headers.get("Host", "localhost")
     connect = response.connect()
-    connect.stream(url=f"wss://{host}/twilio/clinic/stream/{call_sid}")
+    connect.stream(url=public_ws_url(f"/twilio/clinic/stream/{call_sid}"))
     logger.info(f"[{call_sid}] Clinic callback answered, connecting media stream")
     return PlainTextResponse(str(response), media_type="application/xml")
 
@@ -63,7 +63,7 @@ async def clinic_twiml(request: Request, db: AsyncSession = Depends(get_db)):
 async def clinic_call_status(request: Request, db: AsyncSession = Depends(get_db)):
     """Twilio status callbacks: ringing / in-progress / completed / no-answer / busy / failed."""
     form_data = await request.form()
-    if not validator.validate(str(request.url), dict(form_data), request.headers.get("X-Twilio-Signature", "")):
+    if not validator.validate(public_request_url(request), dict(form_data), request.headers.get("X-Twilio-Signature", "")):
         return PlainTextResponse("Unauthorized", status_code=403)
 
     call_sid = form_data.get("CallSid", "")

@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios'
+import { API_BASE, LOGIN_URL } from './paths'
 
 export interface ApiError {
   detail: string
@@ -10,7 +11,7 @@ class ApiClient {
 
   constructor() {
     this.client = axios.create({
-      baseURL: '/api',
+      baseURL: API_BASE,
       timeout: 30000,
     })
 
@@ -34,7 +35,7 @@ class ApiClient {
       (error) => {
         if (error.response?.status === 401) {
           localStorage.removeItem('access_token')
-          window.location.href = '/login'
+          window.location.href = LOGIN_URL
         }
         return Promise.reject(error)
       }

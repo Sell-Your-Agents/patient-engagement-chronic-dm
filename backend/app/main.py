@@ -58,6 +58,7 @@ app = FastAPI(
     description="Agentic AI for proactive patient engagement in chronic disease management",
     version="1.0.0",
     lifespan=lifespan,
+    root_path=settings.root_path,
 )
 
 # CORS middleware

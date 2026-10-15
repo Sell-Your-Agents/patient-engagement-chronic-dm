@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     app_name: str = "Patient Engagement for Chronic Disease Management"
     org_name: str = "Hospital System"
     api_base_url: str = "http://localhost:8000"
+    # Path prefix when served behind a reverse proxy (e.g. "/patientpulse-api"); empty locally
+    root_path: str = ""
     app_port: int = 8000
 
     # Scheduler configuration

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { apiClient } from '../lib/apiClient'
+import { LOGIN_URL } from '../lib/paths'
 
 export interface User {
   id: number
@@ -74,7 +75,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       isAuthenticated: false,
       error: null,
     })
-    window.location.href = '/login'
+    window.location.href = LOGIN_URL
   },
 
   loadUser: async () => {

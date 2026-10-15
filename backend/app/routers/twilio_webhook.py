@@ -21,6 +21,7 @@ from app.services.prompt_builder import build_system_prompt
 from app.services.call_finalizer import finalize_call, handle_failed_call
 from app.services.stt_service import SarvamStream
 from app.services.audio_utils import decode_twilio_payload
+from app.services.public_url import public_request_url, public_ws_url
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ async def twiml_response(request: Request, db: AsyncSession = Depends(get_db)):
 
     # Validate Twilio request signature
     form_data = await request.form()
-    url = str(request.url)
+    url = public_request_url(request)
     if not validator.validate(url, dict(form_data), request.headers.get("X-Twilio-Signature", "")):
         logger.warning("❌ Invalid Twilio signature")
         return PlainTextResponse("Unauthorized", status_code=403)
@@ -99,8 +100,7 @@ Say hello to {outreach_call.patient.first_name} and explain you're calling to ch
     )
 
     # Connect to websocket stream
-    host = request.headers.get('Host', 'localhost')
-    ws_url = f"wss://{host}/twilio/stream/{call_sid}"
+    ws_url = public_ws_url(f"/twilio/stream/{call_sid}")
     logger.info(f"📡 WebSocket URL: {ws_url}")
 
     connect = response.connect()
@@ -125,7 +125,7 @@ async def call_status_update(request: Request, db: AsyncSession = Depends(get_db
     """Handle Twilio call status updates (webhooks)."""
     # Validate signature
     form_data = await request.form()
-    url = str(request.url)
+    url = public_request_url(request)
     if not validator.validate(url, dict(form_data), request.headers.get("X-Twilio-Signature", "")):
         return PlainTextResponse("Unauthorized", status_code=403)
 

@@ -13,6 +13,7 @@ import { MissedCallsPage } from './pages/clinic/MissedCallsPage'
 import { ClinicCallsPage } from './pages/clinic/ClinicCallsPage'
 import { ClinicAppointmentsPage } from './pages/clinic/ClinicAppointmentsPage'
 import { DoctorsPage } from './pages/clinic/DoctorsPage'
+import { ROUTER_BASEPATH } from './lib/paths'
 
 // Root route
 const rootRoute = new RootRoute({
@@ -125,7 +126,7 @@ const routeTree = rootRoute.addChildren([
 ])
 
 // Create router
-export const router = new Router({ routeTree })
+export const router = new Router({ routeTree, basepath: ROUTER_BASEPATH })
 
 // Register router for type safety
 declare module '@tanstack/react-router' {
