@@ -8,7 +8,11 @@ import { EscalationQueuePage } from './pages/EscalationQueuePage'
 import { EscalationDetailPage } from './pages/EscalationDetailPage'
 import { AppointmentListPage } from './pages/AppointmentListPage'
 import { OutreachCallListPage } from './pages/OutreachCallListPage'
-import { useAuthStore } from './store/authStore'
+import { ClinicDashboardPage } from './pages/clinic/ClinicDashboardPage'
+import { MissedCallsPage } from './pages/clinic/MissedCallsPage'
+import { ClinicCallsPage } from './pages/clinic/ClinicCallsPage'
+import { ClinicAppointmentsPage } from './pages/clinic/ClinicAppointmentsPage'
+import { DoctorsPage } from './pages/clinic/DoctorsPage'
 
 // Root route
 const rootRoute = new RootRoute({
@@ -72,6 +76,37 @@ const callListRoute = new Route({
   component: OutreachCallListPage,
 })
 
+// Missed-call callback agent
+const clinicDashboardRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/clinic',
+  component: ClinicDashboardPage,
+})
+
+const clinicMissedCallsRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/clinic/missed-calls',
+  component: MissedCallsPage,
+})
+
+const clinicCallsRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/clinic/calls',
+  component: ClinicCallsPage,
+})
+
+const clinicAppointmentsRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/clinic/appointments',
+  component: ClinicAppointmentsPage,
+})
+
+const clinicDoctorsRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/clinic/doctors',
+  component: DoctorsPage,
+})
+
 // Create route tree
 const routeTree = rootRoute.addChildren([
   loginRoute,
@@ -82,6 +117,11 @@ const routeTree = rootRoute.addChildren([
   escalationDetailRoute,
   appointmentListRoute,
   callListRoute,
+  clinicDashboardRoute,
+  clinicMissedCallsRoute,
+  clinicCallsRoute,
+  clinicAppointmentsRoute,
+  clinicDoctorsRoute,
 ])
 
 // Create router

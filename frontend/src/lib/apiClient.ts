@@ -134,7 +134,7 @@ class ApiClient {
 
   async initiateCall(data: {
     patient_id: number
-    care_plan_id: number
+    care_plan_id?: number
   }) {
     const response = await this.client.post('/outreach-calls/initiate', data)
     return response.data
@@ -217,6 +217,73 @@ class ApiClient {
     const response = await this.client.get('/analytics/kpis/trend', {
       params: { days },
     })
+    return response.data
+  }
+
+  // Missed-call callback agent (clinic)
+  async getClinicInfo() {
+    const response = await this.client.get('/clinic/info')
+    return response.data
+  }
+
+  async getClinicStats() {
+    const response = await this.client.get('/clinic/stats')
+    return response.data
+  }
+
+  async listClinicDoctors() {
+    const response = await this.client.get('/clinic/doctors')
+    return response.data
+  }
+
+  async getDoctorAvailability(doctorId: number, days = 7) {
+    const response = await this.client.get(`/clinic/doctors/${doctorId}/availability`, {
+      params: { days },
+    })
+    return response.data
+  }
+
+  async listMissedCalls() {
+    const response = await this.client.get('/clinic/missed-calls')
+    return response.data
+  }
+
+  async createMissedCall(data: {
+    phone_number: string
+    caller_name?: string
+    missed_at?: string
+    notes?: string
+  }) {
+    const response = await this.client.post('/clinic/missed-calls', data)
+    return response.data
+  }
+
+  async deleteMissedCall(id: number) {
+    await this.client.delete(`/clinic/missed-calls/${id}`)
+  }
+
+  async startCallback(missedCallId: number) {
+    const response = await this.client.post(`/clinic/missed-calls/${missedCallId}/callback`)
+    return response.data
+  }
+
+  async listClinicCalls() {
+    const response = await this.client.get('/clinic/calls')
+    return response.data
+  }
+
+  async listClinicAppointments(params: {
+    date_from?: string
+    date_to?: string
+    doctor_id?: number
+    status?: string
+  } = {}) {
+    const response = await this.client.get('/clinic/appointments', { params })
+    return response.data
+  }
+
+  async updateClinicAppointment(id: number, status: 'cancelled' | 'completed') {
+    const response = await this.client.patch(`/clinic/appointments/${id}`, { status })
     return response.data
   }
 }

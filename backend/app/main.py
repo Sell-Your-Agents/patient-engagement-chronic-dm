@@ -37,6 +37,13 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
+    # Demo doctors for the missed-call callback agent (only inserted once)
+    from app.database import AsyncSessionLocal
+    from app.services.clinic_scheduling import seed_clinic_doctors
+
+    async with AsyncSessionLocal() as db:
+        await seed_clinic_doctors(db)
+
     # Background scheduler task will be started here in Phase 3
     # scheduler_task = asyncio.create_task(run_outreach_scheduler())
 
@@ -103,6 +110,8 @@ from app.routers import (
     appointments,
     medication_reminders,
     analytics,
+    clinic,
+    clinic_twilio,
 )
 
 app.include_router(auth.router)
@@ -115,6 +124,8 @@ app.include_router(escalations.router)
 app.include_router(appointments.router)
 app.include_router(medication_reminders.router)
 app.include_router(analytics.router)
+app.include_router(clinic.router)
+app.include_router(clinic_twilio.router)
 
 
 @app.get("/", include_in_schema=False)

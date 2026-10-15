@@ -27,11 +27,11 @@ export function useOutreachCalls(patientId?: number) {
   return useQuery({
     queryKey: ['outreach-calls', patientId],
     queryFn: async () => {
-      const data = await apiClient.listOutreachCalls(0, 100)
+      const data = (await apiClient.listOutreachCalls(0, 100)) as OutreachCall[]
       if (patientId) {
-        return data.filter((call: OutreachCall) => call.patient_id === patientId)
+        return data.filter((call) => call.patient_id === patientId)
       }
-      return data as OutreachCall[]
+      return data
     },
     refetchInterval: 60000, // Refetch every minute
   })

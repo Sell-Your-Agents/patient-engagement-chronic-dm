@@ -49,8 +49,10 @@ export function useUpdateEscalation() {
       const { id, ...updateData } = data
       return await apiClient.updateEscalation(id, updateData)
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['escalations'] })
+      queryClient.invalidateQueries({ queryKey: ['escalation', variables.id] })
+      queryClient.invalidateQueries({ queryKey: ['kpis'] })
     },
   })
 }

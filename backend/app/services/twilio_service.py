@@ -99,6 +99,10 @@ class CallSession:
             self.is_agent_speaking = False
             self._speak_interrupted = False
 
+    async def process_agent_sentence(self, sentence: str) -> str:
+        """Hook for subclasses to handle custom control tokens. Returns the sentence to use."""
+        return sentence
+
     async def add_turn(self, role: str, content: str) -> None:
         """Add turn to conversation history."""
         self.conversation_history.append({"role": role, "content": content})
@@ -150,6 +154,9 @@ class CallSession:
                         break
                     if not self.is_call_active or self._speak_interrupted:
                         break
+
+                    # Let subclasses act on custom control tokens (e.g. bookings)
+                    sentence = await self.process_agent_sentence(sentence)
 
                     # Accumulate full response
                     full_response += sentence + " "

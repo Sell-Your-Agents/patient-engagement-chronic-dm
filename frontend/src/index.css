@@ -2,6 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  Claymorphism design system.
+  Written as plain CSS (outside @layer) so every class is always shipped,
+  including ones built dynamically such as `tint-${name}`.
+*/
+
+:root {
+  --ink: #1e2633;
+  --ink-soft: #5b6576;
+  --ink-muted: #94a0b2;
+  --surface: #f8fafc;
+  --surface-2: #fdfeff;
+  --page: #eaeff5;
+  --brand-1: #ffa94d;
+  --brand-2: #ff7a1a;
+  --brand-3: #f25c05;
+  --shadow-dark: rgba(150, 166, 190, 0.38);
+  --shadow-light: rgba(255, 255, 255, 0.95);
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -9,14 +29,393 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--ink);
+  background: var(--page);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* No visible scrollbars anywhere — content that doesn't fit still scrolls with wheel/touch */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+/* ---------- Surfaces ---------- */
+.clay-bg {
+  background:
+    radial-gradient(1100px 560px at 0% 0%, #e2eef3 0%, transparent 60%),
+    radial-gradient(900px 520px at 100% 100%, #f3e9df 0%, transparent 55%),
+    var(--page);
+}
+
+.clay {
+  background: var(--surface);
+  border-radius: 24px;
+  box-shadow:
+    10px 10px 24px var(--shadow-dark),
+    -8px -8px 20px var(--shadow-light),
+    inset 2px 2px 3px rgba(255, 255, 255, 0.9),
+    inset -2px -2px 6px rgba(150, 166, 190, 0.1);
+}
+
+.clay-sm {
+  background: var(--surface-2);
+  box-shadow:
+    5px 5px 12px rgba(150, 166, 190, 0.34),
+    -5px -5px 10px var(--shadow-light),
+    inset 1px 1px 2px rgba(255, 255, 255, 0.9),
+    inset -2px -2px 4px rgba(150, 166, 190, 0.1);
+}
+
+.clay-inset {
+  background: #f1f4f8;
+  box-shadow:
+    inset 3px 3px 8px rgba(150, 166, 190, 0.32),
+    inset -3px -3px 8px var(--shadow-light);
+}
+
+.card-title {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+/* ---------- Buttons ---------- */
+.clay-btn,
+.clay-btn-ghost,
+.clay-btn-green,
+.clay-btn-blue {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 14px;
+  font-weight: 700;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  padding: 0.7rem 1.1rem;
+  transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  white-space: nowrap;
+}
+.clay-btn:hover:not(:disabled),
+.clay-btn-ghost:hover:not(:disabled),
+.clay-btn-green:hover:not(:disabled),
+.clay-btn-blue:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.clay-btn:active:not(:disabled),
+.clay-btn-green:active:not(:disabled),
+.clay-btn-blue:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.clay-btn:disabled,
+.clay-btn-ghost:disabled,
+.clay-btn-green:disabled,
+.clay-btn-blue:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.clay-btn {
+  color: #fff;
+  background: linear-gradient(135deg, var(--brand-1) 0%, var(--brand-2) 55%, var(--brand-3) 100%);
+  box-shadow:
+    6px 8px 16px rgba(242, 92, 5, 0.28),
+    inset 2px 2px 3px rgba(255, 255, 255, 0.45),
+    inset -2px -3px 5px rgba(150, 50, 0, 0.22);
+}
+.clay-btn-green {
+  color: #fff;
+  background: linear-gradient(135deg, #4cd5a0 0%, #17b077 100%);
+  box-shadow:
+    6px 8px 16px rgba(23, 176, 119, 0.26),
+    inset 2px 2px 3px rgba(255, 255, 255, 0.4),
+    inset -2px -3px 5px rgba(0, 90, 50, 0.2);
+}
+.clay-btn-blue {
+  color: #fff;
+  background: linear-gradient(135deg, #7ba8ff 0%, #4776ec 100%);
+  box-shadow:
+    6px 8px 16px rgba(71, 118, 236, 0.26),
+    inset 2px 2px 3px rgba(255, 255, 255, 0.4),
+    inset -2px -3px 5px rgba(20, 50, 140, 0.2);
+}
+.clay-btn-ghost {
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--surface-2);
+  box-shadow:
+    4px 4px 10px rgba(150, 166, 190, 0.32),
+    -4px -4px 9px var(--shadow-light),
+    inset 1px 1px 2px rgba(255, 255, 255, 0.9);
+}
+.clay-btn-ghost:active:not(:disabled) {
+  box-shadow:
+    inset 3px 3px 7px rgba(150, 166, 190, 0.32),
+    inset -3px -3px 7px var(--shadow-light);
+}
+.btn-sm {
+  padding: 0.45rem 0.8rem !important;
+  font-size: 0.8125rem !important;
+  border-radius: 12px !important;
+}
+.btn-icon {
+  padding: 0 !important;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 12px !important;
+}
+
+/* ---------- Inputs ---------- */
+.clay-input {
+  width: 100%;
+  border-radius: 14px;
+  padding: 0.7rem 1rem;
+  font-size: 0.875rem;
+  color: var(--ink);
+  outline: none;
+  background: #f1f4f8;
+  box-shadow:
+    inset 3px 3px 8px rgba(150, 166, 190, 0.3),
+    inset -3px -3px 8px var(--shadow-light);
+  transition: box-shadow 0.15s ease;
+}
+.clay-input::placeholder {
+  color: var(--ink-muted);
+}
+.clay-input:focus {
+  box-shadow:
+    inset 3px 3px 8px rgba(150, 166, 190, 0.3),
+    inset -3px -3px 8px var(--shadow-light),
+    0 0 0 3px rgba(255, 122, 26, 0.22);
+}
+
+/* ---------- Stat cards ---------- */
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 80px;
+  padding: 0.8rem 1rem;
+  border-radius: 20px;
+  box-shadow:
+    8px 8px 18px rgba(150, 166, 190, 0.32),
+    -6px -6px 14px var(--shadow-light),
+    inset 2px 2px 4px rgba(255, 255, 255, 0.75),
+    inset -3px -3px 7px rgba(0, 0, 0, 0.035);
+}
+.stat-bubble {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 13px;
+  color: #fff;
+  box-shadow:
+    inset 2px 2px 3px rgba(255, 255, 255, 0.45),
+    inset -2px -3px 5px rgba(0, 0, 0, 0.14);
+}
+
+/* Tints: light card background + matching solid bubble */
+.tint-peach { background: linear-gradient(145deg, #fff6ec 0%, #ffe6cf 100%); }
+.tint-mint { background: linear-gradient(145deg, #effcf5 0%, #d3f5e3 100%); }
+.tint-lavender { background: linear-gradient(145deg, #f4f1ff 0%, #e2dcff 100%); }
+.tint-coral { background: linear-gradient(145deg, #fff1ec 0%, #ffd9cc 100%); }
+.tint-amber { background: linear-gradient(145deg, #fffaeb 0%, #ffedc2 100%); }
+.tint-sky { background: linear-gradient(145deg, #eff7ff 0%, #d5e8fd 100%); }
+.tint-rose { background: linear-gradient(145deg, #fff0f4 0%, #ffd8e2 100%); }
+.tint-teal { background: linear-gradient(145deg, #ecfbfb 0%, #cdf1f1 100%); }
+
+.bubble-peach { background: linear-gradient(135deg, #ffb36b, #ff7a1a); box-shadow: 4px 6px 12px rgba(255, 122, 26, 0.3), inset 2px 2px 3px rgba(255,255,255,.45), inset -2px -3px 5px rgba(0,0,0,.14); }
+.bubble-mint { background: linear-gradient(135deg, #5ad9a6, #17b077); box-shadow: 4px 6px 12px rgba(23, 176, 119, 0.3), inset 2px 2px 3px rgba(255,255,255,.45), inset -2px -3px 5px rgba(0,0,0,.14); }
+.bubble-lavender { background: linear-gradient(135deg, #a993ff, #6c4fe6); box-shadow: 4px 6px 12px rgba(108, 79, 230, 0.3), inset 2px 2px 3px rgba(255,255,255,.45), inset -2px -3px 5px rgba(0,0,0,.14); }
+.bubble-coral { background: linear-gradient(135deg, #ff9677, #f0532b); box-shadow: 4px 6px 12px rgba(240, 83, 43, 0.3), inset 2px 2px 3px rgba(255,255,255,.45), inset -2px -3px 5px rgba(0,0,0,.14); }
+.bubble-amber { background: linear-gradient(135deg, #ffd166, #f5a300); box-shadow: 4px 6px 12px rgba(245, 163, 0, 0.3), inset 2px 2px 3px rgba(255,255,255,.45), inset -2px -3px 5px rgba(0,0,0,.14); }
+.bubble-sky { background: linear-gradient(135deg, #7cb8ff, #3b7ff0); box-shadow: 4px 6px 12px rgba(59, 127, 240, 0.3), inset 2px 2px 3px rgba(255,255,255,.45), inset -2px -3px 5px rgba(0,0,0,.14); }
+.bubble-rose { background: linear-gradient(135deg, #ff8fab, #e83e6c); box-shadow: 4px 6px 12px rgba(232, 62, 108, 0.3), inset 2px 2px 3px rgba(255,255,255,.45), inset -2px -3px 5px rgba(0,0,0,.14); }
+.bubble-teal { background: linear-gradient(135deg, #4fd1d1, #0e9f9f); box-shadow: 4px 6px 12px rgba(14, 159, 159, 0.3), inset 2px 2px 3px rgba(255,255,255,.45), inset -2px -3px 5px rgba(0,0,0,.14); }
+
+/* ---------- Pills ---------- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1rem;
+  white-space: nowrap;
+  box-shadow: inset 1px 1px 2px rgba(255, 255, 255, 0.8);
+}
+
+/* ---------- Tables ---------- */
+.clay-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.clay-table th {
+  padding: 0.7rem 1rem;
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  background: rgba(241, 244, 248, 0.7);
+  white-space: nowrap;
+}
+.clay-table td {
+  padding: 0.62rem 1rem;
+  font-size: 0.875rem;
+  vertical-align: middle;
+}
+.clay-table tbody tr {
+  border-top: 1px solid rgba(203, 213, 225, 0.6);
+  transition: background 0.15s ease;
+}
+.clay-table tbody tr:hover {
+  background: rgba(255, 243, 232, 0.6);
+}
+.clay-table tbody tr.row-selected {
+  background: rgba(255, 237, 220, 0.8);
+}
+
+/* Responsive table columns: hidden until the viewport is wide enough (no horizontal scroll) */
+.col-md,
+.col-lg,
+.col-xl,
+.col-2xl {
+  display: none;
+}
+@media (min-width: 768px) {
+  .col-md { display: table-cell; }
+}
+@media (min-width: 1024px) {
+  .col-lg { display: table-cell; }
+}
+@media (min-width: 1280px) {
+  .col-xl { display: table-cell; }
+}
+@media (min-width: 1536px) {
+  .col-2xl { display: table-cell; }
+}
+@media print {
+  .col-md, .col-lg, .col-xl, .col-2xl { display: table-cell !important; }
+}
+
+/* ---------- Sidebar ---------- */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  height: 2.4rem;
+  padding: 0 0.85rem;
+  border-radius: 13px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.nav-item:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.75);
+}
+.nav-item-active,
+.nav-item-active:hover {
+  color: #fff;
+  background: linear-gradient(135deg, var(--brand-1) 0%, var(--brand-2) 55%, var(--brand-3) 100%);
+  box-shadow:
+    6px 8px 16px rgba(242, 92, 5, 0.26),
+    inset 2px 2px 3px rgba(255, 255, 255, 0.45),
+    inset -2px -3px 5px rgba(150, 50, 0, 0.2);
+}
+
+/* Brand mark */
+.logo-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--brand-1) 0%, var(--brand-2) 55%, var(--brand-3) 100%);
+  box-shadow:
+    4px 6px 12px rgba(242, 92, 5, 0.3),
+    inset 2px 2px 3px rgba(255, 255, 255, 0.5),
+    inset -2px -3px 5px rgba(150, 50, 0, 0.25);
+}
+.logo-text {
+  background: linear-gradient(135deg, var(--brand-1) 0%, var(--brand-3) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Thin scrollbars inside clay panels */
+.clay-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.clay-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+.clay-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- Print ---------- */
+.print-only {
+  display: none;
+}
+@media print {
+  @page {
+    margin: 14mm;
+  }
+  body,
+  .clay-bg {
+    background: #fff !important;
+  }
+  .no-print,
+  aside {
+    display: none !important;
+  }
+  .app-frame,
+  main {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  main.clay {
+    box-shadow: none !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+  }
+  .clay,
+  .clay-sm,
+  .stat-card {
+    box-shadow: none !important;
+    border: 1px solid #e2e8f0;
+  }
+  .clay-table th {
+    background: #f1f5f9 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .clay-scroll {
+    overflow: visible !important;
+  }
 }

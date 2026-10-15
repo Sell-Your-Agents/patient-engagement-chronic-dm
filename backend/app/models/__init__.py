@@ -8,6 +8,13 @@ from app.models.next_outreach_schedule import NextOutreachSchedule
 from app.models.escalation_case import EscalationCase
 from app.models.appointment import Appointment
 from app.models.medication_reminder import MedicationReminder
+from app.models.clinic import (
+    ClinicDoctor,
+    MissedCall,
+    ClinicCall,
+    ClinicCallTurn,
+    ClinicAppointment,
+)
 
 __all__ = [
     "CareTeamUser",
@@ -22,4 +29,9 @@ __all__ = [
     "EscalationCase",
     "Appointment",
     "MedicationReminder",
+    "ClinicDoctor",
+    "MissedCall",
+    "ClinicCall",
+    "ClinicCallTurn",
+    "ClinicAppointment",
 ]

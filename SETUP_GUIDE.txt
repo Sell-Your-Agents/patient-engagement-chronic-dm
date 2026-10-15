@@ -1,0 +1,292 @@
+================================================================================
+   PATIENTPULSE — HEALTHCARE AI VOICE AGENTS
+   Setup, Run & Demo Guide (Windows)
+================================================================================
+
+CONTENTS
+  Part 0 — Quick start for the demo (machine already set up before)
+  Part A — What this project is
+  Part B — First-time setup on a new computer
+  Part C — Daily start (one command)
+  Part D — Real phone calls: ngrok + Twilio
+  Part E — Missed-Call Callback Agent (second agent)
+  Part F — Demo script
+  Part G — Troubleshooting
+
+Throughout this guide <PROJECT> means the folder where the repo is cloned,
+e.g. C:\Users\<you>\Desktop\Patient\patient-engagement-chronic-dm
+
+
+--------------------------------------------------------------------------------
+PART 0 — QUICK START FOR THE DEMO (computer that already ran this project)
+--------------------------------------------------------------------------------
+
+Do these once, in order, in PowerShell:
+
+  1. Close any old windows running the backend, frontend or ngrok.
+
+  2. Get the latest code (new branch):
+
+       cd <PROJECT>
+       git status                  (should say "nothing to commit"; if not,
+                                    see Part G "local changes" first)
+       git fetch origin
+       git checkout patientpulse-working
+       git pull
+
+  3. Check backend\.env (it is NOT in git — your own file stays as it is):
+       - API_BASE_URL must be YOUR ngrok https address, e.g.
+           API_BASE_URL=https://your-name.ngrok-free.dev
+       - Twilio / Anthropic / Deepgram / Sarvam keys filled in.
+     Nothing new is required in .env. (Optional new settings: Part E.)
+
+  4. Start everything with one command:
+
+       cd <PROJECT>
+       powershell -ExecutionPolicy Bypass -File .\start-all.ps1
+
+     Three windows open: BACKEND, NGROK, FRONTEND. Wait for the green
+     "ALL READY" message. Keep all three windows open during the demo.
+
+  5. Open http://localhost:5173 and log in:
+       Email:    test@hospital.com
+       Password: TestPass123!
+
+  No new Python or npm packages were added, so no reinstall is needed.
+  The new database tables and 6 demo doctors are created automatically the
+  first time the backend starts. Existing patients and calls are kept.
+
+
+--------------------------------------------------------------------------------
+PART A — WHAT THIS PROJECT IS
+--------------------------------------------------------------------------------
+
+A hospital/clinic web app with TWO AI phone agents (sidebar sections):
+
+  1. CHRONIC CARE (Health Coach agent)
+     Calls patients with Diabetes, Hypertension, COPD or Asthma for check-ins,
+     follows a disease protocol, detects warning signs (creates
+     Escalations), records medication adherence and satisfaction, and logs
+     appointment requests.
+     Pages: Dashboard, Patients, Call Logs, Escalations, Appointments.
+
+  2. MISSED-CALL AGENT (Receptionist "Maya")
+     When the clinic misses a patient's call, staff log the number. Maya calls
+     back, asks the reason, picks the right doctor, books a free time slot
+     DURING the call, and saves name / reason / doctor / time / transcript.
+     Pages: Callback Dashboard, Missed Calls, Callback Logs, Bookings,
+     Doctors.
+
+Technology:
+  backend/   Python 3.11 + FastAPI + SQLite         http://localhost:8000
+  frontend/  React + TypeScript + Vite + Tailwind   http://localhost:5173
+  Calls:     Twilio (phone) + Deepgram (speech-to-text) + Claude (AI)
+             + Sarvam (text-to-speech). English only for now.
+
+What is NOT in git (each computer keeps its own):
+  backend\.env                    API keys and settings
+  backend\patient_engagement.db   the database (patients, calls, bookings)
+  backend\venv\  frontend\node_modules\   installed packages
+  backend\logs\                   log files
+
+
+--------------------------------------------------------------------------------
+PART B — FIRST-TIME SETUP ON A NEW COMPUTER
+--------------------------------------------------------------------------------
+
+STEP 1 — Install (one time)
+  - Python 3.11  https://www.python.org/downloads/  (tick "Add Python to PATH")
+  - Node.js 20+  https://nodejs.org/
+  - Git          https://git-scm.com/
+  Check:  python --version    node --version    npm --version
+
+STEP 2 — Get the code
+  git clone https://github.com/Sell-Your-Agents/patient-engagement-chronic-dm.git
+  cd patient-engagement-chronic-dm
+  git checkout patientpulse-working
+
+STEP 3 — Backend packages
+  cd backend
+  python -m venv venv
+  .\venv\Scripts\python.exe -m pip install --upgrade pip
+  .\venv\Scripts\pip.exe install -r requirements.txt
+
+STEP 4 — Backend settings
+  copy .env.example .env
+  Open backend\.env and set at least:
+    JWT_SECRET_KEY=<long random text>
+      (generate: python -c "import secrets; print(secrets.token_hex(32))")
+  For real phone calls also fill the Twilio, Anthropic, Deepgram and Sarvam
+  keys and API_BASE_URL (see Part D).
+
+STEP 5 — Demo data (creates the login user and 5 demo patients)
+  .\venv\Scripts\python.exe seed.py
+
+STEP 6 — Frontend packages
+  cd ..\frontend
+  npm install
+
+STEP 7 — Start (see Part C)
+
+
+--------------------------------------------------------------------------------
+PART C — DAILY START (ONE COMMAND)
+--------------------------------------------------------------------------------
+
+  cd <PROJECT>
+  powershell -ExecutionPolicy Bypass -File .\start-all.ps1
+
+What it does, in order:
+  1. BACKEND window   — python run.py (port 8000)
+  2. NGROK window     — public tunnel using the address in API_BASE_URL
+  3. FRONTEND window  — npm run dev (port 5173)
+  4. Checks the public address and prints "ALL READY" (green) or an error.
+
+If something is already running it is skipped (no duplicates).
+Keep all 3 windows open. Closing the NGROK window breaks phone calls.
+
+Manual alternative (same order, 3 separate PowerShell windows):
+  1. cd <PROJECT>\backend   ;  .\venv\Scripts\python.exe run.py
+  2. ngrok http --domain=<your-ngrok-domain> 8000
+  3. cd <PROJECT>\frontend  ;  npm run dev
+
+To stop: press Ctrl + C in each window (or close them).
+
+
+--------------------------------------------------------------------------------
+PART D — REAL PHONE CALLS: NGROK + TWILIO
+--------------------------------------------------------------------------------
+
+Why: when a call is answered, Twilio must reach the backend over the internet.
+"localhost" is not reachable, so ngrok gives a public https address.
+
+One-time ngrok setup:
+  1. Sign up: https://dashboard.ngrok.com/signup
+  2. Install:  winget install ngrok.ngrok   (then close & reopen PowerShell)
+  3. Connect your account (token from the ngrok dashboard → Your Authtoken):
+       ngrok config add-authtoken <your-token>
+     (paste the token ONCE — a doubled token gives ERR_NGROK_105)
+  4. If ngrok says the version is too old (ERR_NGROK_121):  ngrok update
+  5. Get your free permanent domain: ngrok dashboard → Domains.
+  6. In backend\.env:  API_BASE_URL=https://<your-domain>
+     A domain only works with the ngrok account that owns it
+     (ERR_NGROK_320 = domain belongs to another account).
+
+Twilio:
+  - TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER in backend\.env
+  - On a Twilio TRIAL account you can only call numbers verified in the
+    Twilio console (Phone Numbers → Verified Caller IDs).
+
+Test: open https://<your-domain>/health in a browser → {"status":"ok"}.
+(ngrok may first show a warning page — click "Visit Site".)
+
+
+--------------------------------------------------------------------------------
+PART E — MISSED-CALL CALLBACK AGENT
+--------------------------------------------------------------------------------
+
+Demo doctors (created automatically on first backend start):
+
+  Doctor              Specialty          Days            Hours        Slot
+  Dr. Ananya Rao      General Physician  Mon–Sat         9 AM–1 PM    15 min
+  Dr. Rajesh Kumar    General Surgeon    Mon, Wed, Fri   10 AM–1 PM   20 min
+  Dr. Priya Menon     Orthopedics        Mon–Fri         2 PM–5 PM    20 min
+  Dr. Sameer Khan     Dentist            Mon–Sat         10 AM–2 PM   15 min
+  Dr. Kavitha Reddy   Cardiologist       Tue, Thu, Sat   9 AM–12 PM   20 min
+  Dr. Arjun Iyer      Neurologist        Mon, Wed, Fri   3 PM–6 PM    20 min
+
+How a callback works:
+  1. Missed Calls page → enter the phone number (10 digits = +91 added
+     automatically) → "Call Back". Or use "Quick Callback" in the sidebar.
+  2. Maya calls, apologises for the missed call, asks the problem and name,
+     chooses the doctor, offers free slots, books the chosen one during the
+     call, confirms it and says goodbye.
+  3. Results: Callback Logs (summary + full conversation), Bookings (print
+     list or a single slip), Callback Dashboard.
+  Double bookings and times outside a doctor's hours are rejected.
+  For emergencies (severe chest pain, stroke signs) Maya advises 108 / ER.
+
+Optional settings in backend\.env (defaults shown):
+  CLINIC_NAME=Sunrise Multispeciality Clinic
+  CLINIC_AGENT_NAME=Maya
+
+
+--------------------------------------------------------------------------------
+PART F — DEMO SCRIPT (about 5 minutes)
+--------------------------------------------------------------------------------
+
+Before the demo:
+  - start-all.ps1 shows "ALL READY".
+  - The phone you will use is verified in Twilio (trial accounts).
+
+Chronic care agent:
+  1. Dashboard → show the KPI cards.
+  2. Patients → click a patient → Edit → put the demo phone number → Save.
+  3. Click "Initiate Call", answer the phone, talk to the health coach.
+  4. Call Logs → View → transcript, adherence, warning signs.
+     Escalations → any case created from warning signs.
+
+Missed-call agent:
+  1. Doctors → show specialties, days, hours, free slots.
+  2. Missed Calls → enter the demo phone number → "Call Back".
+  3. Answer and say e.g. "I have fever since three days" → give a name →
+     accept a time slot (say "AM"/"morning" clearly) → "nothing else".
+  4. Bookings → the new appointment (patient, date/time, clinic, reason,
+     doctor) → "Print slip".
+  5. Callback Logs → View → the full conversation and summary.
+
+Tips for a smooth call: speak clearly, wait for Maya to finish a sentence
+before answering, and keep the phone close.
+
+
+--------------------------------------------------------------------------------
+PART G — TROUBLESHOOTING
+--------------------------------------------------------------------------------
+
+Call says "An application error has occurred. Goodbye."
+  → Twilio cannot reach the backend. Almost always ngrok is not running
+    or API_BASE_URL does not match the ngrok domain.
+    Re-run start-all.ps1 and check https://<your-domain>/health.
+
+"ngrok is not recognized"
+  → Close and reopen PowerShell after installing, or just use start-all.ps1
+    (it finds ngrok automatically).
+
+Backend window: "jwt_secret_key Field required"
+  → backend\.env missing or JWT_SECRET_KEY empty (Part B step 4).
+
+Login fails / "Invalid credentials"
+  → Run once in backend:  .\venv\Scripts\python.exe seed.py
+
+Page keeps going back to login, or shows network errors
+  → BACKEND window is closed or crashed. Re-run start-all.ps1.
+
+Styles look broken / plain text after pulling new code
+  → Close the FRONTEND window, re-run start-all.ps1, then press
+    Ctrl + Shift + R in the browser.
+
+A missed call shows "Calling..." for a long time
+  → If Twilio never reported back (e.g. ngrok was down), it is marked
+    "Failed" automatically after 3 minutes; then use "Call Again".
+
+"Port 8000 (or 5173) is already in use"
+  → start-all.ps1 skips it. To stop it manually:
+      netstat -ano | findstr :8000
+      taskkill /PID <number> /F
+
+git checkout / pull says "local changes would be overwritten"
+  → See what changed:  git status
+    To keep a copy of local changes and continue:
+      git stash
+      git checkout patientpulse-working
+      git pull
+    (git stash pop brings the local changes back later, if needed.)
+
+Calls to a number fail immediately (Twilio trial)
+  → Verify that number in the Twilio console.
+
+Previously recorded calls/data are missing on another computer
+  → The database is not in git. Copy backend\patient_engagement.db from
+    the computer that has the data (stop the backend first).
+
+================================================================================

@@ -28,6 +28,7 @@ export function usePatient(id: number) {
       const data = await apiClient.getPatient(id)
       return data as Patient
     },
+    enabled: id > 0,
   })
 }
 
@@ -35,11 +36,13 @@ export function useInitiateCall() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (data: { patient_id: number; care_plan_id: number }) => {
+    mutationFn: async (data: { patient_id: number; care_plan_id?: number }) => {
       return await apiClient.initiateCall(data)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['outreach-calls'] })
+      queryClient.invalidateQueries({ queryKey: ['call-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['kpis'] })
     },
   })
 }

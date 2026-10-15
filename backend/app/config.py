@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # Agent configuration
     agent_name: str = "Health Assistant"
 
+    # Missed-call callback agent (single clinic for now)
+    clinic_name: str = "Sunrise Multispeciality Clinic"
+    clinic_agent_name: str = "Maya"
+    clinic_utc_offset_minutes: int = 330  # IST (UTC+5:30); clinic schedules use local clinic time
+    clinic_booking_days_ahead: int = 7
+
     class Config:
         env_file = ".env"
         case_sensitive = False
