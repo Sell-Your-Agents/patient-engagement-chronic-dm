@@ -12,6 +12,7 @@ CONTENTS
   Part E — Missed-Call Callback Agent (second agent)
   Part F — Demo script
   Part G — Troubleshooting
+  Part H — Deploying to the dev server (callingapp-dev.zensark.com)
 
 Throughout this guide <PROJECT> means the folder where the repo is cloned,
 e.g. C:\Users\<you>\Desktop\Patient\patient-engagement-chronic-dm
@@ -288,5 +289,74 @@ Calls to a number fail immediately (Twilio trial)
 Previously recorded calls/data are missing on another computer
   → The database is not in git. Copy backend\patient_engagement.db from
     the computer that has the data (stop the backend first).
+
+
+--------------------------------------------------------------------------------
+PART H — DEPLOYING TO THE DEV SERVER (callingapp-dev.zensark.com)
+--------------------------------------------------------------------------------
+
+Layout on the server (Swaasa is NOT touched — it keeps "/", "/api", "/twilio"):
+
+  https://callingapp-dev.zensark.com/patientpulse/       PatientPulse frontend
+      → static files in /usr/share/nginx/html/patientpulse (served by nginx)
+  https://callingapp-dev.zensark.com/patientpulse-api/   PatientPulse backend
+      → Docker container "patientpulse-api" on 127.0.0.1:8010
+  Database: /home/ec2-user/patientpulse-data/patient_engagement.db
+  No ngrok on the server — Twilio reaches the public https address directly.
+
+Files in the repo used for this:
+  deploy/deploy.sh               one-command deploy / update
+  deploy/patientpulse-nginx.conf nginx routes for /patientpulse and /patientpulse-api
+  frontend/.env.production       build settings (/patientpulse/, /patientpulse-api/api)
+  backend/.dockerignore          keeps .env and the database out of the image
+
+FIRST-TIME DEPLOY (log in to the server as ec2-user)
+
+  1. Get the code:
+       cd ~
+       git clone -b patientpulse-deploy https://github.com/Sell-Your-Agents/patient-engagement-chronic-dm.git patientpulse
+       cd patientpulse
+
+  2. Create the backend settings file:
+       cp backend/.env.example backend/.env
+       nano backend/.env
+     Set these (and fill in the Twilio / Anthropic / Deepgram / Sarvam keys):
+       JWT_SECRET_KEY=<long random text>
+       API_BASE_URL=https://callingapp-dev.zensark.com/patientpulse-api
+     (DATABASE_URL and ROOT_PATH are set by deploy.sh — no need to add them.)
+     Save in nano: Ctrl+O, Enter, Ctrl+X.
+
+  3. One-time nginx step (adds ONE include line to the site config; backup first):
+       sudo cp /etc/nginx/conf.d/calling-agent.conf ~/calling-agent.conf.backup
+       sudo cp deploy/patientpulse-nginx.conf /etc/nginx/patientpulse.locations
+       sudo sed -i '/listen 443 ssl; # managed by Certbot/i \    include /etc/nginx/patientpulse.locations;' /etc/nginx/conf.d/calling-agent.conf
+       sudo nginx -t
+     "nginx -t" must say "syntax is ok" and "test is successful".
+     (If not, restore:  sudo cp ~/calling-agent.conf.backup /etc/nginx/conf.d/calling-agent.conf)
+
+  4. Deploy:
+       bash deploy/deploy.sh
+
+  5. Test:
+       https://callingapp-dev.zensark.com/patientpulse-api/health  → {"status":"ok"}
+       https://callingapp-dev.zensark.com/patientpulse/            → login page
+       Login: test@hospital.com / TestPass123!
+     Then make one test call (Patients → Initiate Call, and Missed Calls → Call Back).
+
+UPDATING LATER (after new code is pushed to the branch)
+       cd ~/patientpulse
+       bash deploy/deploy.sh
+
+USEFUL SERVER COMMANDS
+  Backend logs (live):     sudo docker logs -f --tail 100 patientpulse-api
+  Restart backend:         sudo docker restart patientpulse-api
+  Is it running?           sudo docker ps
+  nginx errors:            sudo tail -n 50 /var/log/nginx/error.log
+
+UNDO (remove PatientPulse from the server, Swaasa unaffected)
+  sudo docker rm -f patientpulse-api
+  sudo cp ~/calling-agent.conf.backup /etc/nginx/conf.d/calling-agent.conf
+  sudo nginx -t && sudo systemctl reload nginx
+  sudo rm -rf /usr/share/nginx/html/patientpulse /etc/nginx/patientpulse.locations
 
 ================================================================================

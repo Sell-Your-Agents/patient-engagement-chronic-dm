@@ -1,0 +1,13 @@
+# Keep secrets, local data and local environments out of the Docker image.
+# Settings are passed at runtime with --env-file instead.
+.env
+.env.*
+!.env.example
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite
+*.sqlite3
+logs/
