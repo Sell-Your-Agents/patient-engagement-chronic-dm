@@ -138,7 +138,7 @@ def _appointment_out(a: ClinicAppointment) -> AppointmentResponse:
     )
 
 
-# A callback Twilio never reported back on (e.g. the ngrok tunnel was down) would otherwise stay
+# A callback Twilio never reported back on (e.g. the Cloudflare tunnel was down) would otherwise stay
 # "calling" forever and block "Call Again". Calls still initiated/ringing after this are failed.
 STALE_CALL_MINUTES = 3
 
@@ -332,7 +332,7 @@ async def start_callback(
     if settings.api_base_url.startswith("http://localhost"):
         raise HTTPException(
             status_code=400,
-            detail="API_BASE_URL must be your public ngrok https URL so Twilio can reach the backend",
+            detail="API_BASE_URL must be your public https URL (Cloudflare tunnel) so Twilio can reach the backend",
         )
 
     clinic_call = ClinicCall(

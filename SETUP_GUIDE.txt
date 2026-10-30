@@ -8,7 +8,7 @@ CONTENTS
   Part A — What this project is
   Part B — First-time setup on a new computer
   Part C — Daily start (one command)
-  Part D — Real phone calls: ngrok + Twilio
+  Part D — Real phone calls: Cloudflare tunnel + Twilio
   Part E — Missed-Call Callback Agent (second agent)
   Part F — Demo script
   Part G — Troubleshooting
@@ -24,7 +24,8 @@ PART 0 — QUICK START FOR THE DEMO (computer that already ran this project)
 
 Do these once, in order, in PowerShell:
 
-  1. Close any old windows running the backend, frontend or ngrok.
+  1. Close any old windows running the backend, frontend, ngrok or
+     cloudflared.
 
   2. Get the latest code (new branch):
 
@@ -36,17 +37,17 @@ Do these once, in order, in PowerShell:
        git pull
 
   3. Check backend\.env (it is NOT in git — your own file stays as it is):
-       - API_BASE_URL must be YOUR ngrok https address, e.g.
-           API_BASE_URL=https://your-name.ngrok-free.dev
        - Twilio / Anthropic / Deepgram / Sarvam keys filled in.
-     Nothing new is required in .env. (Optional new settings: Part E.)
+       - API_BASE_URL is filled in AUTOMATICALLY by start-all.ps1 with the
+         Cloudflare tunnel address — do not edit it by hand.
+     cloudflared must be installed (Part D). (Optional new settings: Part E.)
 
   4. Start everything with one command:
 
        cd <PROJECT>
        powershell -ExecutionPolicy Bypass -File .\start-all.ps1
 
-     Three windows open: BACKEND, NGROK, FRONTEND. Wait for the green
+     Three windows open: CLOUDFLARE, BACKEND, FRONTEND. Wait for the green
      "ALL READY" message. Keep all three windows open during the demo.
 
   5. Open http://localhost:5173 and log in:
@@ -138,48 +139,48 @@ PART C — DAILY START (ONE COMMAND)
   powershell -ExecutionPolicy Bypass -File .\start-all.ps1
 
 What it does, in order:
-  1. BACKEND window   — python run.py (port 8000)
-  2. NGROK window     — public tunnel using the address in API_BASE_URL
-  3. FRONTEND window  — npm run dev (port 5173)
+  1. CLOUDFLARE window — public tunnel; its new https address is written
+                         to API_BASE_URL in backend\.env
+  2. BACKEND window    — python run.py (port 8000); restarted if it was
+                         already running, so it uses the new address
+  3. FRONTEND window   — npm run dev (port 5173)
   4. Checks the public address and prints "ALL READY" (green) or an error.
 
-If something is already running it is skipped (no duplicates).
-Keep all 3 windows open. Closing the NGROK window breaks phone calls.
+The tunnel address changes every time it starts — always use start-all.ps1.
+Keep all 3 windows open. Closing the CLOUDFLARE window breaks phone calls.
 
 Manual alternative (same order, 3 separate PowerShell windows):
-  1. cd <PROJECT>\backend   ;  .\venv\Scripts\python.exe run.py
-  2. ngrok http --domain=<your-ngrok-domain> 8000
+  1. cloudflared tunnel --url http://localhost:8000
+     → copy the https://....trycloudflare.com address it prints into
+       API_BASE_URL in backend\.env
+  2. cd <PROJECT>\backend   ;  .\venv\Scripts\python.exe run.py
   3. cd <PROJECT>\frontend  ;  npm run dev
 
 To stop: press Ctrl + C in each window (or close them).
 
 
 --------------------------------------------------------------------------------
-PART D — REAL PHONE CALLS: NGROK + TWILIO
+PART D — REAL PHONE CALLS: CLOUDFLARE TUNNEL + TWILIO
 --------------------------------------------------------------------------------
 
 Why: when a call is answered, Twilio must reach the backend over the internet.
-"localhost" is not reachable, so ngrok gives a public https address.
+"localhost" is not reachable, so a Cloudflare tunnel gives a public https
+address (https://<random-words>.trycloudflare.com). No account or token needed.
 
-One-time ngrok setup:
-  1. Sign up: https://dashboard.ngrok.com/signup
-  2. Install:  winget install ngrok.ngrok   (then close & reopen PowerShell)
-  3. Connect your account (token from the ngrok dashboard → Your Authtoken):
-       ngrok config add-authtoken <your-token>
-     (paste the token ONCE — a doubled token gives ERR_NGROK_105)
-  4. If ngrok says the version is too old (ERR_NGROK_121):  ngrok update
-  5. Get your free permanent domain: ngrok dashboard → Domains.
-  6. In backend\.env:  API_BASE_URL=https://<your-domain>
-     A domain only works with the ngrok account that owns it
-     (ERR_NGROK_320 = domain belongs to another account).
+One-time setup:
+  1. Install:  winget install Cloudflare.cloudflared
+     (then close & reopen PowerShell). start-all.ps1 also finds it in
+     C:\cloudflared\cloudflared.exe if you downloaded the exe yourself.
+  2. Check:    cloudflared --version
+  That's it — start-all.ps1 starts the tunnel and sets API_BASE_URL.
 
 Twilio:
   - TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER in backend\.env
   - On a Twilio TRIAL account you can only call numbers verified in the
     Twilio console (Phone Numbers → Verified Caller IDs).
 
-Test: open https://<your-domain>/health in a browser → {"status":"ok"}.
-(ngrok may first show a warning page — click "Visit Site".)
+Test: open <API_BASE_URL from backend\.env>/health in a browser
+      → {"status":"ok"}.
 
 
 --------------------------------------------------------------------------------
@@ -245,13 +246,13 @@ PART G — TROUBLESHOOTING
 --------------------------------------------------------------------------------
 
 Call says "An application error has occurred. Goodbye."
-  → Twilio cannot reach the backend. Almost always ngrok is not running
-    or API_BASE_URL does not match the ngrok domain.
-    Re-run start-all.ps1 and check https://<your-domain>/health.
+  → Twilio cannot reach the backend. Almost always the CLOUDFLARE window
+    was closed, or the tunnel was restarted by hand and API_BASE_URL is
+    the old address. Re-run start-all.ps1 and check <API_BASE_URL>/health.
 
-"ngrok is not recognized"
+"cloudflared is not recognized"
   → Close and reopen PowerShell after installing, or just use start-all.ps1
-    (it finds ngrok automatically).
+    (it finds cloudflared automatically).
 
 Backend window: "jwt_secret_key Field required"
   → backend\.env missing or JWT_SECRET_KEY empty (Part B step 4).
@@ -267,7 +268,7 @@ Styles look broken / plain text after pulling new code
     Ctrl + Shift + R in the browser.
 
 A missed call shows "Calling..." for a long time
-  → If Twilio never reported back (e.g. ngrok was down), it is marked
+  → If Twilio never reported back (e.g. the tunnel was down), it is marked
     "Failed" automatically after 3 minutes; then use "Call Again".
 
 "Port 8000 (or 5173) is already in use"
@@ -302,7 +303,7 @@ Layout on the server (Swaasa is NOT touched — it keeps "/", "/api", "/twilio")
   https://callingapp-dev.zensark.com/patientpulse-api/   PatientPulse backend
       → Docker container "patientpulse-api" on 127.0.0.1:8010
   Database: /home/ec2-user/patientpulse-data/patient_engagement.db
-  No ngrok on the server — Twilio reaches the public https address directly.
+  No tunnel on the server — Twilio reaches the public https address directly.
 
 Files in the repo used for this:
   deploy/deploy.sh               one-command deploy / update
