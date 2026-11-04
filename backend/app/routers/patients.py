@@ -35,6 +35,7 @@ class PatientResponse(BaseModel):
     phone_number: str
     preferred_language: str
     status: str
+    call_memory: Optional[dict] = None
 
     class Config:
         from_attributes = True

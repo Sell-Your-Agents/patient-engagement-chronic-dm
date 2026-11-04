@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -47,10 +48,16 @@ async def lifespan(app: FastAPI):
     # Background scheduler task will be started here in Phase 3
     # scheduler_task = asyncio.create_task(run_outreach_scheduler())
 
+    # Places feedback callbacks scheduled from Call Logs when they fall due
+    from app.services.feedback_scheduler import run_feedback_scheduler
+
+    feedback_task = asyncio.create_task(run_feedback_scheduler())
+
     yield
 
     # Shutdown
     logger.info("Application shutting down...")
+    feedback_task.cancel()
 
 
 app = FastAPI(

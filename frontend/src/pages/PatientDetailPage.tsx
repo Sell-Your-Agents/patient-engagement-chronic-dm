@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams } from '@tanstack/react-router'
-import { usePatient, useInitiateCall } from '../hooks/usePatients'
+import { usePatient, useInitiateCall, PatientMemory } from '../hooks/usePatients'
 import { useOutreachCalls } from '../hooks/useOutreachCalls'
 import { useAppointments } from '../hooks/useAppointments'
 import { Icon } from '../components/Icon'
@@ -160,6 +160,80 @@ export function PatientDetailPage() {
         </div>
       </div>
 
+      <CallMemory memory={patient.call_memory} />
+
+    </div>
+  )
+}
+
+function MemoryList({ title, items, tone }: { title: string; items?: string[]; tone: string }) {
+  if (!items?.length) return null
+  return (
+    <div>
+      <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-ink-muted">{title}</p>
+      <div className="flex flex-wrap gap-2">
+        {items.map((item) => (
+          <span key={item} className={`pill ${tone}`}>
+            {item}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function CallMemory({ memory }: { memory?: PatientMemory | null }) {
+  return (
+    <div className="clay mt-4 p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="card-title">What the Call Agent Remembers</p>
+        {memory?.updated_at && (
+          <p className="text-xs text-ink-muted">
+            {memory.calls_remembered} calls · updated {formatShortDateTime(memory.updated_at, true)}
+          </p>
+        )}
+      </div>
+      {!memory ? (
+        <p className="mt-2 text-sm text-ink-muted">
+          Nothing yet. The agent starts remembering this patient after their first answered call.
+        </p>
+      ) : (
+        <div className="mt-3 grid gap-4">
+          {memory.overview && <p className="text-sm text-ink-soft">{memory.overview}</p>}
+          {memory.condition_trend && (
+            <Field label="Condition over time">{memory.condition_trend}</Field>
+          )}
+          {!!memory.medicines?.length && (
+            <div className="clay-inset grid gap-2 rounded-[18px] p-4">
+              {memory.medicines.map((m) => (
+                <Field key={m.name} label={m.name}>
+                  {m.notes || 'No issues'}
+                </Field>
+              ))}
+            </div>
+          )}
+          <MemoryList title="Still ongoing" items={memory.ongoing_issues} tone="bg-amber-100 text-amber-700" />
+          <MemoryList title="Waiting on the care team" items={memory.open_questions} tone="bg-sky-100 text-sky-700" />
+          <MemoryList title="Resolved" items={memory.resolved_issues} tone="bg-emerald-100 text-emerald-700" />
+          <MemoryList title="Personal notes" items={memory.personal_notes} tone="bg-violet-100 text-violet-700" />
+          {!!memory.history?.length && (
+            <div>
+              <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-ink-muted">Call timeline</p>
+              <div className="space-y-1.5">
+                {[...memory.history].reverse().map((h) => (
+                  <p key={h.call_id} className="text-sm text-ink-soft">
+                    <span className="font-bold text-ink">
+                      #{h.call_id} · {h.date}
+                      {h.purpose === 'feedback' ? ' · Feedback' : ''}
+                    </span>{' '}
+                    — {h.summary}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

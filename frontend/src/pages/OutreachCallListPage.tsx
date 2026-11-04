@@ -1,4 +1,12 @@
-import { useOutreachCalls, useCallStats } from '../hooks/useOutreachCalls'
+import {
+  useOutreachCalls,
+  useCallStats,
+  useFeedbackSchedules,
+  useFeedbackCallback,
+  useScheduleFeedback,
+  useCancelFeedbackSchedule,
+  type FeedbackSummary,
+} from '../hooks/useOutreachCalls'
 import { usePatients } from '../hooks/usePatients'
 import { useState } from 'react'
 import { Icon } from '../components/Icon'
@@ -95,6 +103,8 @@ export function OutreachCallListPage() {
         </div>
       </div>
 
+      <ScheduledCallbacks />
+
       {/* Call table */}
       <div className="clay mt-6 overflow-hidden">
         <div>
@@ -123,7 +133,12 @@ export function OutreachCallListPage() {
                       {patient && <p className="text-xs font-semibold text-ink-soft">{patient.phone_number}</p>}
                     </td>
                     <td className="col-2xl">
-                      <span className="pill bg-slate-100 text-slate-700">#{call.id}</span>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="pill bg-slate-100 text-slate-700">#{call.id}</span>
+                        {call.purpose === 'feedback' && (
+                          <span className="pill bg-violet-100 text-violet-700">Feedback</span>
+                        )}
+                      </div>
                     </td>
                     <td className="col-md whitespace-nowrap text-ink-soft">{formatShortDateTime(call.started_at)}</td>
                     <td className="col-lg font-bold">{callDuration(call.started_at, call.ended_at)}</td>
@@ -216,10 +231,19 @@ export function OutreachCallListPage() {
             </div>
 
             {selected.warning_signs_detected && (
-              <div className="mt-5 flex items-center gap-3 rounded-2xl bg-rose-50 p-4 font-bold text-rose-700">
-                <Icon name="alert" className="h-5 w-5" /> Warning Signs Detected
+              <div className="mt-5 rounded-2xl bg-rose-50 p-4 text-rose-700">
+                <p className="flex items-center gap-3 font-bold">
+                  <Icon name="alert" className="h-5 w-5" /> Warning Signs Detected
+                </p>
+                {selected.structured_summary?.warning_sign_details && (
+                  <p className="mt-1 pl-8 text-sm">{selected.structured_summary.warning_sign_details}</p>
+                )}
               </div>
             )}
+
+            <FeedbackCallbackPanel key={selected.id} callId={selected.id} />
+
+            {selected.structured_summary && <FeedbackDetails feedback={selected.structured_summary} />}
 
             <div className="mt-6">
               <p className="mb-3 flex items-center gap-2 font-extrabold text-ink">
@@ -234,6 +258,323 @@ export function OutreachCallListPage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const WORKING_COLOR: Record<string, string> = {
+  yes: 'bg-emerald-100 text-emerald-700',
+  partly: 'bg-amber-100 text-amber-700',
+  no: 'bg-rose-100 text-rose-700',
+}
+
+const FOLLOWUP_COLOR: Record<string, string> = {
+  resolved: 'bg-emerald-100 text-emerald-700',
+  better: 'bg-emerald-100 text-emerald-700',
+  same: 'bg-amber-100 text-amber-700',
+  worse: 'bg-rose-100 text-rose-700',
+  still_open: 'bg-sky-100 text-sky-700',
+}
+
+function FeedbackDetails({ feedback }: { feedback: FeedbackSummary }) {
+  const medications = feedback.medications || []
+  const problems = feedback.problems || []
+  const queries = feedback.patient_queries || []
+  const followups = feedback.previous_call_followup || []
+
+  return (
+    <div className="mt-6 space-y-5">
+      <div>
+        <p className="mb-3 flex items-center gap-2 font-extrabold text-ink">
+          <Icon name="messages" className="h-4 w-4 text-orange-500" /> Patient Feedback
+        </p>
+        {feedback.summary && <p className="text-sm leading-relaxed text-ink-soft">{feedback.summary}</p>}
+        <div className="clay-inset mt-3 grid grid-cols-2 gap-4 rounded-[18px] p-4 md:grid-cols-3">
+          <Field label="Condition">
+            <span className="capitalize">{feedback.symptom_status || '—'}</span>
+          </Field>
+          <Field label="Sentiment">
+            <span className="capitalize">{feedback.sentiment || '—'}</span>
+          </Field>
+          <Field label="Outcome">
+            <span className="capitalize">{feedback.outcome?.replace(/_/g, ' ') || '—'}</span>
+          </Field>
+        </div>
+        {feedback.disease_feedback && (
+          <p className="mt-3 text-sm text-ink-soft">
+            <span className="font-bold text-ink">In their words: </span>
+            {feedback.disease_feedback}
+          </p>
+        )}
+        {feedback.callback_requested_time && (
+          <p className="mt-2 text-sm text-ink-soft">
+            <span className="font-bold text-ink">Call back: </span>
+            {feedback.callback_requested_time}
+          </p>
+        )}
+      </div>
+
+      {followups.length > 0 && (
+        <div>
+          <p className="mb-3 flex items-center gap-2 font-extrabold text-ink">
+            <Icon name="clock" className="h-4 w-4 text-orange-500" /> Follow-up on Previous Call
+            {feedback.previous_call_id && (
+              <span className="text-xs font-semibold text-ink-soft">#{feedback.previous_call_id}</span>
+            )}
+          </p>
+          <div className="space-y-2">
+            {followups.map((f, i) => (
+              <div key={i} className="clay-inset rounded-2xl px-4 py-3 text-sm">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="font-bold text-ink">{f.item}</p>
+                  <span className={`pill capitalize ${FOLLOWUP_COLOR[f.status] || 'bg-slate-100 text-slate-700'}`}>
+                    {f.status.replace(/_/g, ' ')}
+                  </span>
+                </div>
+                {f.notes && <p className="mt-1 text-ink-soft">{f.notes}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {medications.length > 0 && (
+        <div>
+          <p className="mb-3 flex items-center gap-2 font-extrabold text-ink">
+            <Icon name="pill" className="h-4 w-4 text-orange-500" /> Medicines
+          </p>
+          <div className="space-y-2">
+            {medications.map((m, i) => (
+              <div key={i} className="clay-inset rounded-2xl px-4 py-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-bold text-ink">{m.name}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {m.working && m.working !== 'unknown' && (
+                      <span className={`pill ${WORKING_COLOR[m.working] || 'bg-slate-100 text-slate-700'}`}>
+                        Working: {m.working}
+                      </span>
+                    )}
+                    {m.taking_as_prescribed === false && (
+                      <span className="pill bg-amber-100 text-amber-700">Not as prescribed</span>
+                    )}
+                  </div>
+                </div>
+                {m.side_effects && <p className="mt-1 text-ink-soft">Side effects: {m.side_effects}</p>}
+                {m.missed_doses && <p className="mt-1 text-ink-soft">Missed doses: {m.missed_doses}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {problems.length > 0 && (
+        <div>
+          <p className="mb-3 flex items-center gap-2 font-extrabold text-ink">
+            <Icon name="alert" className="h-4 w-4 text-orange-500" /> Problems Reported
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-ink-soft">
+            {problems.map((p, i) => (
+              <li key={i}>{p}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {queries.length > 0 && (
+        <div>
+          <p className="mb-3 flex items-center gap-2 font-extrabold text-ink">
+            <Icon name="hash" className="h-4 w-4 text-orange-500" /> Patient Questions
+          </p>
+          <div className="space-y-2">
+            {queries.map((q, i) => (
+              <div key={i} className="clay-inset rounded-2xl px-4 py-3 text-sm">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="font-bold text-ink">{q.question}</p>
+                  {q.needs_doctor_followup && (
+                    <span className="pill bg-sky-100 text-sky-700">Needs doctor follow-up</span>
+                  )}
+                </div>
+                {q.answer_given && <p className="mt-1 text-ink-soft">Answer: {q.answer_given}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {feedback.appointment_details && (
+        <p className="flex items-center gap-2 text-sm text-ink-soft">
+          <Icon name="calendar" className="h-4 w-4 text-orange-500" />
+          <span className="font-bold text-ink">Appointment:</span> {feedback.appointment_details}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function apiError(err: any, fallback: string) {
+  return err?.response?.data?.detail || fallback
+}
+
+// Default for the schedule picker: tomorrow 10:00 local time, in datetime-local format
+function defaultScheduleTime() {
+  const d = new Date()
+  d.setDate(d.getDate() + 1)
+  d.setHours(10, 0, 0, 0)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function FeedbackCallbackPanel({ callId }: { callId: number }) {
+  const { mutate: callNow, isPending: isCalling } = useFeedbackCallback()
+  const { mutate: schedule, isPending: isScheduling } = useScheduleFeedback()
+  const [showSchedule, setShowSchedule] = useState(false)
+  const [when, setWhen] = useState(defaultScheduleTime)
+  const [notes, setNotes] = useState('')
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const startNow = () => {
+    setMessage(null)
+    callNow(callId, {
+      onSuccess: (call: any) =>
+        setMessage({ ok: true, text: `Feedback call #${call.id} started. Its feedback will appear in Call Logs when it ends.` }),
+      onError: (err) => setMessage({ ok: false, text: apiError(err, 'Failed to start feedback call') }),
+    })
+  }
+
+  const saveSchedule = () => {
+    setMessage(null)
+    schedule(
+      { callId, scheduled_at: new Date(when).toISOString(), notes: notes.trim() || undefined },
+      {
+        onSuccess: () => {
+          setShowSchedule(false)
+          setNotes('')
+          setMessage({ ok: true, text: `Feedback callback scheduled for ${formatDateTime(new Date(when).toISOString())}.` })
+        },
+        onError: (err) => setMessage({ ok: false, text: apiError(err, 'Failed to schedule callback') }),
+      }
+    )
+  }
+
+  return (
+    <div className="clay-inset mt-5 rounded-[18px] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="font-extrabold text-ink">Feedback Callback</p>
+          <p className="text-xs text-ink-soft">Call the patient back to ask about their condition, medicines, problems and questions.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={startNow} disabled={isCalling} className="clay-btn btn-sm">
+            <Icon name="phoneCall" className="h-4 w-4" />
+            {isCalling ? 'Calling...' : 'Call Now'}
+          </button>
+          <button onClick={() => setShowSchedule((s) => !s)} className="clay-btn-ghost btn-sm">
+            <Icon name="calendar" className="h-4 w-4" /> Schedule
+          </button>
+        </div>
+      </div>
+
+      {showSchedule && (
+        <div className="mt-4 grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-end">
+          <label className="text-xs font-bold uppercase tracking-wider text-ink-muted">
+            Date & time
+            <input
+              type="datetime-local"
+              value={when}
+              onChange={(e) => setWhen(e.target.value)}
+              className="clay-input mt-1 block w-full text-sm font-semibold normal-case tracking-normal text-ink"
+            />
+          </label>
+          <label className="text-xs font-bold uppercase tracking-wider text-ink-muted">
+            Note (optional)
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="e.g. Ask about the new medicine"
+              className="clay-input mt-1 block w-full text-sm font-semibold normal-case tracking-normal text-ink"
+            />
+          </label>
+          <button onClick={saveSchedule} disabled={isScheduling || !when} className="clay-btn btn-sm">
+            {isScheduling ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      )}
+
+      {message && (
+        <p className={`mt-3 text-sm font-semibold ${message.ok ? 'text-emerald-600' : 'text-rose-600'}`}>{message.text}</p>
+      )}
+    </div>
+  )
+}
+
+const SCHEDULE_STATUS_STYLE: Record<string, string> = {
+  pending: 'bg-sky-100 text-sky-700',
+  dialing: 'bg-amber-100 text-amber-700',
+  dialed: 'bg-emerald-100 text-emerald-700',
+  failed: 'bg-rose-100 text-rose-700',
+  cancelled: 'bg-slate-100 text-slate-600',
+}
+
+function ScheduledCallbacks() {
+  const { data: schedules } = useFeedbackSchedules()
+  const { mutate: cancel, isPending: isCancelling } = useCancelFeedbackSchedule()
+  const [showAll, setShowAll] = useState(false)
+
+  const upcoming = (schedules || [])
+    .filter((s) => s.status === 'pending' || s.status === 'dialing')
+    .sort((a, b) => a.scheduled_time.localeCompare(b.scheduled_time))
+  const past = (schedules || []).filter((s) => s.status !== 'pending' && s.status !== 'dialing')
+  const shown = showAll ? [...upcoming, ...past] : upcoming
+  if (!schedules?.length) return null
+
+  return (
+    <div className="clay mt-6 overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-5 pb-3 pt-4">
+        <p className="card-title flex items-center gap-2">
+          <Icon name="calendar" className="h-4 w-4 text-orange-500" /> Scheduled Feedback Callbacks
+        </p>
+        {past.length > 0 && (
+          <button onClick={() => setShowAll((s) => !s)} className="clay-btn-ghost btn-sm">
+            {showAll ? 'Upcoming only' : `Show history (${past.length})`}
+          </button>
+        )}
+      </div>
+      {shown.length === 0 ? (
+        <p className="px-5 pb-4 text-sm text-ink-muted">No upcoming callbacks</p>
+      ) : (
+        <div className="space-y-2 px-4 pb-4">
+          {shown.map((s) => (
+            <div key={s.id} className="clay-inset flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-ink">
+                  {s.patient_name}
+                  {s.source_outreach_call_id && (
+                    <span className="ml-2 text-xs font-semibold text-ink-soft">from call #{s.source_outreach_call_id}</span>
+                  )}
+                </p>
+                <p className="text-xs text-ink-soft">{formatShortDateTime(s.scheduled_time, true)}</p>
+                {s.notes && <p className="mt-0.5 whitespace-pre-wrap text-xs text-ink-muted">{s.notes}</p>}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`pill capitalize ${SCHEDULE_STATUS_STYLE[s.status] || 'bg-slate-100 text-slate-600'}`}>
+                  {s.status}
+                </span>
+                {s.status === 'pending' && (
+                  <button
+                    onClick={() => cancel(s.id)}
+                    disabled={isCancelling}
+                    className="clay-btn-ghost btn-icon"
+                    title="Cancel callback"
+                  >
+                    <Icon name="x" className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

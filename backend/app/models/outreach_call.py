@@ -17,6 +17,8 @@ class OutreachCall(Base):
     call_sid: Mapped[Optional[str]] = mapped_column(String(50), unique=True, nullable=True)
     stream_sid: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     direction: Mapped[str] = mapped_column(String(20), default="outbound")
+    # "checkin" (routine health check-in) or "feedback" (feedback callback from Call Logs)
+    purpose: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default="checkin")
     status: Mapped[str] = mapped_column(String(20), default="initiated")
     attempt_number: Mapped[int] = mapped_column(Integer, default=1)
     is_retry: Mapped[bool] = mapped_column(Boolean, default=False)

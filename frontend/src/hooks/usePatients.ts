@@ -9,6 +9,20 @@ export interface Patient {
   phone_number: string
   preferred_language: string
   status: string
+  call_memory?: PatientMemory | null
+}
+
+export interface PatientMemory {
+  overview?: string
+  condition_trend?: string | null
+  medicines?: { name: string; notes?: string | null }[]
+  ongoing_issues?: string[]
+  resolved_issues?: string[]
+  open_questions?: string[]
+  personal_notes?: string[]
+  history?: { call_id: number; date: string; purpose: string; summary?: string | null }[]
+  calls_remembered?: number
+  updated_at?: string
 }
 
 export function usePatients(skip = 0, limit = 50) {

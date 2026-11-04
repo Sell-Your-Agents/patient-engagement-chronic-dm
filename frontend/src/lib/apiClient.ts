@@ -141,6 +141,26 @@ class ApiClient {
     return response.data
   }
 
+  async feedbackCallback(callId: number) {
+    const response = await this.client.post(`/outreach-calls/${callId}/feedback-callback`)
+    return response.data
+  }
+
+  async scheduleFeedbackCallback(callId: number, data: { scheduled_at: string; notes?: string }) {
+    const response = await this.client.post(`/outreach-calls/${callId}/feedback-callback/schedule`, data)
+    return response.data
+  }
+
+  async listFeedbackSchedules() {
+    const response = await this.client.get('/outreach-calls/feedback-schedules')
+    return response.data
+  }
+
+  async cancelFeedbackSchedule(scheduleId: number) {
+    const response = await this.client.delete(`/outreach-calls/feedback-schedules/${scheduleId}`)
+    return response.data
+  }
+
   async getCallStats() {
     const response = await this.client.get('/outreach-calls/stats/summary')
     return response.data

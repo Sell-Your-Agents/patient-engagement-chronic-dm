@@ -1,6 +1,6 @@
 from datetime import datetime, date
 from typing import Optional
-from sqlalchemy import String, DateTime, Text, Boolean, Date
+from sqlalchemy import String, DateTime, Text, Boolean, Date, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -23,6 +23,8 @@ class Patient(Base):
     communication_consent: Mapped[bool] = mapped_column(Boolean, default=True)
     consent_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="active")
+    # What the call agent remembers about this patient across all calls (see services/feedback_agent.py)
+    call_memory: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     enrolled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
