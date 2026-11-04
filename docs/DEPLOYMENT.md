@@ -84,9 +84,9 @@ Visit **http://localhost:5173** and login with:
 - `GET /api/patients/{id}` — Patient detail
 
 ### Calls
-- `GET /api/outreach-calls/` — Call history
-- `POST /api/outreach-calls/initiate` — Dial patient
-- `GET /api/outreach-calls/stats/summary` — Call metrics
+- `GET /api/calls/?direction=outbound` — Call history
+- `POST /api/calls/` — Dial patient
+- `GET /api/calls/stats` — Call metrics
 
 ### Escalations
 - `GET /api/escalations/` — Open cases
@@ -156,7 +156,7 @@ Demo data includes:
 
 ### Voice Testing
 Requires valid Twilio credentials (set in `.env`). Without them:
-- `/api/outreach-calls/initiate` creates a record but fails at Twilio step
+- `POST /api/calls/` creates a record but fails at Twilio step
 - All other endpoints work without Twilio
 
 ---

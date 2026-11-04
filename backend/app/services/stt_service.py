@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-class SarvamStream:
+class DeepgramStream:
     # Configuration mapping per IVR digit
     language_config_map: Dict[str, dict] = {
         "1": {"api_version": "v1", "model": "nova-3", "language": "te"},           # Telugu
@@ -350,6 +350,6 @@ class SarvamStream:
 
 async def create_stt_client(language: str = "en"):
     """Factory function to create and connect STT client."""
-    client = SarvamStream(selected_digit="3")  # Default to English/Flux v2
+    client = DeepgramStream(selected_digit="3")  # Default to English/Flux v2
     await client.start()
     return client

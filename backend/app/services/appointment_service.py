@@ -3,12 +3,38 @@ from typing import List, Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.models.appointment import Appointment
+from app.models.appointment import Appointment, SOURCE_AGENT
 from app.models.patient import Patient
+from app.services.clinic_scheduling import book_slot, find_doctor_by_name, get_free_slots
 
 
 class AppointmentService:
-    """Service for managing appointments - currently mock, easily swappable."""
+    """Staff-side appointment requests.
+
+    Uses the same doctors and the same appointment book as the phone agent's live bookings, so
+    neither can double-book the other. Physicians we have no schedule for fall back to mock slots.
+    """
+
+    @staticmethod
+    async def get_availability(
+        db: AsyncSession,
+        physician_name: str,
+        days_ahead: int = 14,
+    ) -> List[Dict]:
+        """Real free slots when the physician is one of our doctors, mock slots otherwise."""
+        doctor = await find_doctor_by_name(db, physician_name)
+        if not doctor:
+            return await AppointmentService.get_mock_availability(physician_name, days_ahead)
+        free = await get_free_slots(db, [doctor], days_ahead)
+        return [
+            {
+                "datetime": slot.isoformat(),
+                "duration_minutes": doctor.slot_minutes,
+                "physician_name": doctor.name,
+                "available": True,
+            }
+            for slot in free[doctor.id]
+        ]
 
     @staticmethod
     async def get_mock_availability(
@@ -65,19 +91,45 @@ class AppointmentService:
     @staticmethod
     async def book_appointment(
         patient_id: int,
-        care_plan_id: Optional[int],
+        plan_id: Optional[int],
         physician_name: str,
         scheduled_at: datetime,
         db: AsyncSession,
     ) -> Appointment:
-        """Book an appointment (creates Appointment record)."""
+        """Request an appointment for a patient (staff confirm it afterwards).
+
+        If the physician is one of our doctors the slot is validated and held in their schedule
+        (raises BookingError if it is not free). Otherwise it is stored against the free-text name.
+        """
+        patient = await db.get(Patient, patient_id)
+        patient_name = f"{patient.first_name} {patient.last_name}" if patient else "Unknown"
+        phone_number = patient.phone_number if patient else None
+
+        doctor = await find_doctor_by_name(db, physician_name)
+        if doctor:
+            return await book_slot(
+                db,
+                doctor_id=doctor.id,
+                start_at=scheduled_at,
+                patient_name=patient_name,
+                phone_number=phone_number,
+                reason="Scheduled during outreach call",
+                source=SOURCE_AGENT,
+                patient_id=patient_id,
+                plan_id=plan_id,
+                status="requested",
+            )
+
         appointment = Appointment(
             patient_id=patient_id,
-            care_plan_id=care_plan_id,
+            plan_id=plan_id,
             physician_name=physician_name,
-            scheduled_at=scheduled_at,
-            duration_minutes=30,
+            patient_name=patient_name,
+            phone_number=phone_number,
+            start_at=scheduled_at,
+            end_at=scheduled_at + timedelta(minutes=30),
             status="requested",
+            source=SOURCE_AGENT,
             reason="Scheduled during outreach call",
         )
         db.add(appointment)

@@ -1,11 +1,12 @@
 from datetime import timedelta
+from typing import Optional
 from fastapi import APIRouter, HTTPException, status, Depends
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.care_team_user import CareTeamUser
-from app.schemas.auth import UserCreate, UserLogin, TokenResponse, UserResponse
+from app.models.user import User
 from app.security import hash_password, verify_password, create_access_token
 from app.deps import get_current_user
 from app.config import get_settings
@@ -14,11 +15,41 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 settings = get_settings()
 
 
+class UserCreate(BaseModel):
+    name: str
+    email: EmailStr
+    phone: Optional[str] = None
+    password: str
+    role: str = "care_manager"
+
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    name: str
+    email: str
+    role: str
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+    user: UserResponse
+
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     # Check if user already exists
     result = await db.execute(
-        select(CareTeamUser).where(CareTeamUser.email == user_data.email)
+        select(User).where(User.email == user_data.email)
     )
     existing_user = result.scalar_one_or_none()
     if existing_user:
@@ -29,7 +60,7 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
 
     # Create new user
     hashed_password = hash_password(user_data.password)
-    new_user = CareTeamUser(
+    new_user = User(
         name=user_data.name,
         email=user_data.email,
         phone=user_data.phone,
@@ -46,7 +77,7 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
 async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
     # Find user by email
     result = await db.execute(
-        select(CareTeamUser).where(CareTeamUser.email == user_data.email)
+        select(User).where(User.email == user_data.email)
     )
     user = result.scalar_one_or_none()
 
@@ -78,5 +109,5 @@ async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(current_user: CareTeamUser = Depends(get_current_user)):
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
     return current_user

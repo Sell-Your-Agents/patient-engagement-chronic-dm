@@ -5,8 +5,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
-class CarePlan(Base):
-    __tablename__ = "care_plans"
+class Plan(Base):
+    __tablename__ = "plans"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"))
@@ -20,7 +20,7 @@ class CarePlan(Base):
     status: Mapped[str] = mapped_column(String(20), default="active", index=True)
     assigned_physician_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     adjusted_by_user_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("care_team_users.id"), nullable=True
+        ForeignKey("users.id"), nullable=True
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -7,11 +7,11 @@ import logging
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models.care_team_user import CareTeamUser
-from app.models.outreach_call import OutreachCall
+from app.models.user import User
+from app.models.call_log import CallLog, DIRECTION_OUTBOUND
 from app.models.patient import Patient
 from app.models.appointment import Appointment
-from app.models.escalation_case import EscalationCase
+from app.models.escalation import Escalation
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 @router.get("/kpis", response_model=Dict)
 async def get_kpis(
     db: AsyncSession = Depends(get_db),
-    _: CareTeamUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ) -> Dict:
     """Get key performance indicators for the program."""
     logger.info("GET /api/analytics/kpis called")
@@ -45,14 +45,14 @@ async def get_kpis(
 
         # Total outreach calls
         logger.debug("Fetching total calls...")
-        total_calls_result = await db.execute(select(func.count(OutreachCall.id)))
+        total_calls_result = await db.execute(select(func.count(CallLog.id)).where(CallLog.direction == DIRECTION_OUTBOUND))
         total_calls = total_calls_result.scalar() or 0
         logger.debug(f"Total calls: {total_calls}")
 
         # Completed calls
         logger.debug("Fetching completed calls...")
         completed_calls_result = await db.execute(
-            select(func.count(OutreachCall.id)).where(OutreachCall.status == "completed")
+            select(func.count(CallLog.id)).where(CallLog.direction == DIRECTION_OUTBOUND).where(CallLog.status == "completed")
         )
         completed_calls = completed_calls_result.scalar() or 0
         logger.debug(f"Completed calls: {completed_calls}")
@@ -65,8 +65,8 @@ async def get_kpis(
         # Calls with warning signs detected
         logger.debug("Fetching warning calls...")
         warning_calls_result = await db.execute(
-            select(func.count(OutreachCall.id)).where(
-                OutreachCall.warning_signs_detected == True
+            select(func.count(CallLog.id)).where(CallLog.direction == DIRECTION_OUTBOUND).where(
+                CallLog.warning_signs_detected == True
             )
         )
         warning_calls = warning_calls_result.scalar() or 0
@@ -75,8 +75,9 @@ async def get_kpis(
         # Average CSAT (patient satisfaction)
         logger.debug("Fetching average CSAT...")
         avg_csat_result = await db.execute(
-            select(func.avg(OutreachCall.csat_score)).where(
-                OutreachCall.csat_score.isnot(None)
+            select(func.avg(CallLog.csat_score)).where(
+                CallLog.direction == DIRECTION_OUTBOUND,
+                CallLog.csat_score.isnot(None)
             )
         )
         avg_csat = avg_csat_result.scalar() or 0
@@ -85,8 +86,8 @@ async def get_kpis(
         # Medication adherence (calls reporting good adherence)
         logger.debug("Fetching adherence calls...")
         adherence_calls_result = await db.execute(
-            select(func.count(OutreachCall.id)).where(
-                OutreachCall.medication_adherence_reported.in_(["good", "excellent"])
+            select(func.count(CallLog.id)).where(CallLog.direction == DIRECTION_OUTBOUND).where(
+                CallLog.medication_adherence_reported.in_(["good", "excellent"])
             )
         )
         adherence_calls = adherence_calls_result.scalar() or 0
@@ -105,8 +106,8 @@ async def get_kpis(
         # Escalation cases (open)
         logger.debug("Fetching open escalations...")
         open_escalations_result = await db.execute(
-            select(func.count(EscalationCase.id)).where(
-                EscalationCase.status == "open"
+            select(func.count(Escalation.id)).where(
+                Escalation.status == "open"
             )
         )
         open_escalations = open_escalations_result.scalar() or 0
@@ -137,7 +138,7 @@ async def get_kpis(
 @router.get("/kpis/trend", response_model=List[Dict])
 async def get_kpi_trend(
     db: AsyncSession = Depends(get_db),
-    _: CareTeamUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     days: int = Query(30, ge=7, le=365),
 ) -> List[Dict]:
     """Get KPI trends over time (for charts)."""
@@ -155,29 +156,30 @@ async def get_kpi_trend(
 
             # Calls completed on this date
             calls_result = await db.execute(
-                select(func.count(OutreachCall.id)).where(
-                    OutreachCall.ended_at >= start_of_day,
-                    OutreachCall.ended_at < end_of_day,
-                    OutreachCall.status == "completed",
+                select(func.count(CallLog.id)).where(CallLog.direction == DIRECTION_OUTBOUND).where(
+                    CallLog.ended_at >= start_of_day,
+                    CallLog.ended_at < end_of_day,
+                    CallLog.status == "completed",
                 )
             )
             calls_today = calls_result.scalar() or 0
 
             # Escalations created today
             escalations_result = await db.execute(
-                select(func.count(EscalationCase.id)).where(
-                    EscalationCase.created_at >= start_of_day,
-                    EscalationCase.created_at < end_of_day,
+                select(func.count(Escalation.id)).where(
+                    Escalation.created_at >= start_of_day,
+                    Escalation.created_at < end_of_day,
                 )
             )
             escalations_today = escalations_result.scalar() or 0
 
             # Average CSAT for calls today
             csat_result = await db.execute(
-                select(func.avg(OutreachCall.csat_score)).where(
-                    OutreachCall.ended_at >= start_of_day,
-                    OutreachCall.ended_at < end_of_day,
-                    OutreachCall.csat_score.isnot(None),
+                select(func.avg(CallLog.csat_score)).where(
+                    CallLog.direction == DIRECTION_OUTBOUND,
+                    CallLog.ended_at >= start_of_day,
+                    CallLog.ended_at < end_of_day,
+                    CallLog.csat_score.isnot(None),
                 )
             )
             csat_today = csat_result.scalar() or 0

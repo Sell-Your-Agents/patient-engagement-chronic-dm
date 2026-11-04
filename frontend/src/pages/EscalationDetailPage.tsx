@@ -24,14 +24,18 @@ export function EscalationDetailPage() {
   if (isLoading) return <Loader text="Loading escalation..." />
   if (error || !escalation) return <ErrorState text="Error loading escalation" />
 
-  const patientName = patient ? `${patient.first_name} ${patient.last_name}` : `Patient #${escalation.patient_id}`
+  const patientName = patient
+    ? `${patient.first_name} ${patient.last_name}`
+    : escalation.patient_id === null
+      ? 'Unknown caller'
+      : `Patient #${escalation.patient_id}`
 
   return (
     <div>
       <PageHeader
         back={{ to: '/escalations', label: 'Back to Escalations' }}
         title={`Escalation #${escalation.id}`}
-        subtitle={`Raised during outreach call #${escalation.outreach_call_id}`}
+        subtitle={`Raised during call #${escalation.call_log_id}`}
         actions={<SeverityBadge severity={escalation.severity} />}
       />
 

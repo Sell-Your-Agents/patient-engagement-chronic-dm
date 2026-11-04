@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
-    # Demo doctors for the missed-call callback agent (only inserted once)
+    # Demo doctors shared by both agents (only inserted once)
     from app.database import AsyncSessionLocal
     from app.services.clinic_scheduling import seed_clinic_doctors
 
@@ -104,8 +104,8 @@ from app.routers import (
     auth,
     patients,
     conditions,
-    care_plans,
-    outreach_calls,
+    plans,
+    calls,
     twilio_webhook,
     escalations,
     appointments,
@@ -118,8 +118,8 @@ from app.routers import (
 app.include_router(auth.router)
 app.include_router(patients.router)
 app.include_router(conditions.router)
-app.include_router(care_plans.router)
-app.include_router(outreach_calls.router)
+app.include_router(plans.router)
+app.include_router(calls.router)
 app.include_router(twilio_webhook.router)
 app.include_router(escalations.router)
 app.include_router(appointments.router)
@@ -144,8 +144,8 @@ async def health():
 
 @app.get("/api/debug/users", include_in_schema=False)
 async def debug_users(db: AsyncSession = Depends(get_db)):
-    from app.models.care_team_user import CareTeamUser
-    result = await db.execute(select(CareTeamUser))
+    from app.models.user import User
+    result = await db.execute(select(User))
     users = result.scalars().all()
     return {
         "user_count": len(users),
@@ -153,15 +153,15 @@ async def debug_users(db: AsyncSession = Depends(get_db)):
     }
 
 
-@app.get("/api/debug/care-plans", include_in_schema=False)
-async def debug_care_plans(db: AsyncSession = Depends(get_db)):
-    from app.models.care_plan import CarePlan
+@app.get("/api/debug/plans", include_in_schema=False)
+async def debug_plans(db: AsyncSession = Depends(get_db)):
+    from app.models.plan import Plan
     from app.models.patient import Patient
-    result = await db.execute(select(CarePlan))
+    result = await db.execute(select(Plan))
     plans = result.scalars().all()
     return {
-        "care_plan_count": len(plans),
-        "care_plans": [
+        "plan_count": len(plans),
+        "plans": [
             {"id": p.id, "patient_id": p.patient_id, "status": p.status} for p in plans
         ]
     }

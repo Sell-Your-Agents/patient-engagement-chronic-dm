@@ -1,7 +1,7 @@
 import anthropic
 import json
 import logging
-from typing import Optional, List, Tuple
+from typing import List, Tuple
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -85,19 +85,24 @@ async def finalize_call_summary(
         warning_signs_detected, warning_sign_details, appointment_requested, csat_score
     """
 
-    extraction_prompt = f"""You are analyzing a health coaching call transcript. Extract structured information.
+    extraction_prompt = f"""You are analyzing a phone call handled by a clinic's AI agent. It was either an outbound health check-in with an enrolled patient or an inbound call to the clinic. Extract structured information.
 
 {system_context}
 
 TRANSCRIPT:
 {transcript}
 
-Return a JSON object with exactly these fields:
+Return a JSON object with exactly these fields (use null when something does not apply to this call):
 {{
+  "patient_name": "full name of the patient, or null",
+  "reason": "short phrase describing why the call happened / their problem, or null",
+  "symptoms": ["list", "of", "symptoms"],
+  "urgency": "routine|soon|urgent|emergency",
+  "outcome": "booked|appointment_requested|check_in_completed|declined|info_only|call_later|wrong_number|no_conversation",
   "summary": "2-3 sentence summary of the call",
   "sentiment": "positive|neutral|negative",
   "symptom_status": "stable|worsening|improving|unknown",
-  "medication_adherence": "excellent|good|fair|poor|unknown",
+  "medication_adherence": "excellent|good|fair|poor|unknown, or null if not discussed",
   "warning_signs_detected": true|false,
   "warning_sign_details": "description of red flags or null",
   "appointment_requested": true|false,
@@ -111,7 +116,7 @@ Be conservative: only set warning_signs_detected=true if the patient clearly rep
     try:
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=500,
+            max_tokens=700,
             messages=[{"role": "user", "content": extraction_prompt}],
         )
 
@@ -129,6 +134,11 @@ Be conservative: only set warning_signs_detected=true if the patient clearly rep
     except (json.JSONDecodeError, anthropic.APIError, IndexError) as e:
         print(f"Error finalizing call: {e}")
         return {
+            "patient_name": None,
+            "reason": None,
+            "symptoms": [],
+            "urgency": None,
+            "outcome": None,
             "summary": "Unable to process transcript",
             "sentiment": "unknown",
             "symptom_status": "unknown",

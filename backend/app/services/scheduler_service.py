@@ -7,10 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings
-from app.models.care_plan import CarePlan
+from app.models.plan import Plan
 from app.models.patient import Patient
-from app.models.outreach_call import OutreachCall
-from app.models.next_outreach_schedule import NextOutreachSchedule
+from app.models.call_log import CallLog, DIRECTION_OUTBOUND
+from app.models.callback_schedule import CallbackSchedule
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -27,21 +27,22 @@ async def get_scheduler_session():
     return async_session()
 
 
-async def get_due_care_plans(db: AsyncSession) -> List[CarePlan]:
+async def get_due_plans(db: AsyncSession) -> List[Plan]:
     """Find all active care plans due for outreach."""
     result = await db.execute(
-        select(CarePlan)
-        .where(CarePlan.status == "active")
-        .where(CarePlan.next_due_date <= datetime.utcnow())
+        select(Plan)
+        .where(Plan.status == "active")
+        .where(Plan.next_due_date <= datetime.utcnow())
     )
     return result.scalars().all()
 
 
-async def initiate_call(patient_id: int, care_plan_id: int, db: AsyncSession) -> OutreachCall:
+async def initiate_call(patient_id: int, plan_id: int, db: AsyncSession) -> CallLog:
     """Initiate an outreach call for a patient."""
-    outreach_call = OutreachCall(
+    outreach_call = CallLog(
+        direction=DIRECTION_OUTBOUND,
         patient_id=patient_id,
-        care_plan_id=care_plan_id,
+        plan_id=plan_id,
         channel="voice",
         status="initiated",
         attempt_number=1,
@@ -61,17 +62,17 @@ async def run_outreach_scheduler():
 
             # Pass 1: Check due care plans
             logger.info("Scheduler: Checking for due care plans...")
-            due_plans = await get_due_care_plans(db)
+            due_plans = await get_due_plans(db)
 
-            for care_plan in due_plans:
+            for plan in due_plans:
                 # Verify patient is active and has consent
                 result = await db.execute(
-                    select(Patient).where(Patient.id == care_plan.patient_id)
+                    select(Patient).where(Patient.id == plan.patient_id)
                 )
                 patient = result.scalar_one_or_none()
 
                 if not patient:
-                    logger.warning(f"Patient {care_plan.patient_id} not found")
+                    logger.warning(f"Patient {plan.patient_id} not found")
                     continue
 
                 if patient.status != "active":
@@ -84,10 +85,10 @@ async def run_outreach_scheduler():
 
                 # Initiate call
                 try:
-                    outreach_call = await initiate_call(patient.id, care_plan.id, db)
+                    outreach_call = await initiate_call(patient.id, plan.id, db)
                     logger.info(
                         f"Initiated call {outreach_call.id} for patient {patient.id} "
-                        f"(care plan {care_plan.id})"
+                        f"(care plan {plan.id})"
                     )
                 except Exception as e:
                     logger.error(f"Error initiating call for patient {patient.id}: {e}")

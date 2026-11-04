@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { useDoctors, useDoctorAvailability, useClinicAppointments, type Doctor } from '../../hooks/useClinic'
-import { Icon } from '../../components/Icon'
-import { PageHeader, EmptyState, Loader, ErrorState } from '../../components/ui'
-import { WEEKDAYS, hhmmTo12h, initials, localISODate, mondayIndex } from '../../components/clinic'
+import { useDoctors, useDoctorAvailability, type Doctor } from '../hooks/useClinic'
+import { useAppointments } from '../hooks/useAppointments'
+import { Icon } from '../components/Icon'
+import { PageHeader, EmptyState, Loader, ErrorState } from '../components/ui'
+import { WEEKDAYS, hhmmTo12h, initials, localISODate, mondayIndex } from '../components/clinic'
 
 export function DoctorsPage() {
   const { data: doctors, isLoading, error } = useDoctors()
-  const { data: upcoming } = useClinicAppointments({ date_from: localISODate(new Date()), status: 'booked' })
+  const { data: upcoming } = useAppointments({ date_from: localISODate(new Date()), status: 'booked' })
 
   if (isLoading) return <Loader text="Loading doctors..." />
   if (error) return <ErrorState text="Error loading doctors" />

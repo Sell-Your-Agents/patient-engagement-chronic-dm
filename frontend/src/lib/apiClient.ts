@@ -115,34 +115,32 @@ class ApiClient {
   }
 
   // Care Plans
-  async listCarePlans() {
-    const response = await this.client.get('/care-plans/')
+  async listPlans() {
+    const response = await this.client.get('/plans/')
     return response.data
   }
 
-  // Outreach Calls
-  async listOutreachCalls(skip = 0, limit = 50) {
-    const response = await this.client.get('/outreach-calls/', {
-      params: { skip, limit },
-    })
+  // Calls (inbound + outbound; filter with ?direction=)
+  async listCalls(params: { direction?: string; patient_id?: number; status?: string; skip?: number; limit?: number } = {}) {
+    const response = await this.client.get('/calls/', { params })
     return response.data
   }
 
-  async getOutreachCall(id: number) {
-    const response = await this.client.get(`/outreach-calls/${id}`)
+  async getCall(id: number) {
+    const response = await this.client.get(`/calls/${id}`)
     return response.data
   }
 
   async initiateCall(data: {
     patient_id: number
-    care_plan_id?: number
+    plan_id?: number
   }) {
-    const response = await this.client.post('/outreach-calls/initiate', data)
+    const response = await this.client.post('/calls/', data)
     return response.data
   }
 
-  async getCallStats() {
-    const response = await this.client.get('/outreach-calls/stats/summary')
+  async getCallStats(direction?: string) {
+    const response = await this.client.get('/calls/stats', { params: { direction } })
     return response.data
   }
 
@@ -173,11 +171,16 @@ class ApiClient {
     return response.data
   }
 
-  // Appointments
-  async listAppointments(skip = 0, limit = 50) {
-    const response = await this.client.get('/appointments/', {
-      params: { skip, limit },
-    })
+  // Appointments (phone agent, check-in requests and staff, filtered with query params)
+  async listAppointments(params: {
+    patient_id?: number
+    doctor_id?: number
+    status?: string
+    source?: string
+    date_from?: string
+    date_to?: string
+  } = {}) {
+    const response = await this.client.get('/appointments/', { params: { limit: 1000, ...params } })
     return response.data
   }
 
@@ -221,7 +224,7 @@ class ApiClient {
     return response.data
   }
 
-  // Missed-call callback agent (clinic)
+  // Inbound clinic call agent
   async getClinicInfo() {
     const response = await this.client.get('/clinic/info')
     return response.data
@@ -244,47 +247,8 @@ class ApiClient {
     return response.data
   }
 
-  async listMissedCalls() {
-    const response = await this.client.get('/clinic/missed-calls')
-    return response.data
-  }
-
-  async createMissedCall(data: {
-    phone_number: string
-    caller_name?: string
-    missed_at?: string
-    notes?: string
-  }) {
-    const response = await this.client.post('/clinic/missed-calls', data)
-    return response.data
-  }
-
-  async deleteMissedCall(id: number) {
-    await this.client.delete(`/clinic/missed-calls/${id}`)
-  }
-
-  async startCallback(missedCallId: number) {
-    const response = await this.client.post(`/clinic/missed-calls/${missedCallId}/callback`)
-    return response.data
-  }
-
-  async listClinicCalls() {
-    const response = await this.client.get('/clinic/calls')
-    return response.data
-  }
-
-  async listClinicAppointments(params: {
-    date_from?: string
-    date_to?: string
-    doctor_id?: number
-    status?: string
-  } = {}) {
-    const response = await this.client.get('/clinic/appointments', { params })
-    return response.data
-  }
-
-  async updateClinicAppointment(id: number, status: 'cancelled' | 'completed') {
-    const response = await this.client.patch(`/clinic/appointments/${id}`, { status })
+  async updateAppointment(id: number, status: 'cancelled' | 'completed') {
+    const response = await this.client.patch(`/appointments/${id}`, { status })
     return response.data
   }
 }

@@ -1,5 +1,5 @@
 import { Icon } from './Icon'
-import type { ClinicAppointment } from '../hooks/useClinic'
+import type { Appointment } from '../hooks/useAppointments'
 import { formatDateTime, formatTime } from './ui'
 
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -45,6 +45,9 @@ export function UrgencyBadge({ urgency }: { urgency: string | null }) {
 
 const OUTCOME_LABELS: Record<string, { label: string; cls: string }> = {
   booked: { label: 'Booked', cls: 'bg-emerald-100 text-emerald-700' },
+  appointment_requested: { label: 'Visit requested', cls: 'bg-violet-100 text-violet-700' },
+  check_in_completed: { label: 'Check-in done', cls: 'bg-emerald-100 text-emerald-700' },
+  completed: { label: 'Completed', cls: 'bg-emerald-100 text-emerald-700' },
   declined: { label: 'Declined', cls: 'bg-slate-200 text-slate-600' },
   info_only: { label: 'Info only', cls: 'bg-sky-100 text-sky-700' },
   call_later: { label: 'Call later', cls: 'bg-amber-100 text-amber-700' },
@@ -113,7 +116,7 @@ function escapeHtml(value: string) {
 }
 
 /** Opens a printable appointment slip in a new window. */
-export function printAppointmentSlip(a: ClinicAppointment) {
+export function printAppointmentSlip(a: Appointment) {
   const win = window.open('', '_blank', 'width=720,height=820')
   if (!win) return
   const row = (label: string, value: string) =>
@@ -132,12 +135,12 @@ export function printAppointmentSlip(a: ClinicAppointment) {
 <span class="badge">#${a.id} · ${escapeHtml(a.status.toUpperCase())}</span></div>
 <table>
 ${row('Patient Name', a.patient_name)}
-${row('Phone', a.phone_number)}
+${row('Phone', a.phone_number || '—')}
 ${row('Date & Time', `${formatDateTime(a.start_at)} – ${formatTime(a.end_at)}`)}
 ${row('Doctor', `${a.doctor_name} (${a.doctor_specialty})`)}
 ${row('Reason for Visit', a.reason || '—')}
 ${row('Clinic', a.clinic_name)}
-${row('Booked Via', a.booked_via === 'agent' ? 'AI callback agent' : 'Clinic staff')}
+${row('Booked Via', a.source === 'agent' ? 'AI phone agent' : 'Clinic staff')}
 </table>
 <div class="foot">Please arrive 10 minutes before your appointment time and bring any previous prescriptions or reports.</div>
 <script>window.onload=function(){window.print()}</script>

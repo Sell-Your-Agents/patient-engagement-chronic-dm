@@ -1,4 +1,4 @@
-"""Doctor schedules, free-slot calculation and booking for the missed-call agent.
+"""Doctor schedules, free-slot calculation and booking, shared by every call the agent takes and by staff.
 
 Doctor timings are static demo data for now (seeded once); slots are generated from each
 doctor's working days, hours and slot length, minus already-booked appointments.
@@ -11,7 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models.clinic import ClinicDoctor, ClinicAppointment
+from app.models.appointment import Appointment, ACTIVE_STATUSES, SOURCE_AGENT
+from app.models.doctor import Doctor
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -92,23 +93,34 @@ def _parse_hhmm(value: str) -> time:
 
 async def seed_clinic_doctors(db: AsyncSession) -> None:
     """Insert the demo doctors once (no-op if any doctor exists)."""
-    result = await db.execute(select(ClinicDoctor.id).limit(1))
+    result = await db.execute(select(Doctor.id).limit(1))
     if result.scalar_one_or_none() is not None:
         return
     for data in DEMO_DOCTORS:
-        db.add(ClinicDoctor(**data))
+        db.add(Doctor(**data))
     await db.commit()
     logger.info("Seeded %d demo clinic doctors", len(DEMO_DOCTORS))
 
 
-async def get_active_doctors(db: AsyncSession) -> List[ClinicDoctor]:
+async def find_doctor_by_name(db: AsyncSession, name: Optional[str]) -> Optional[Doctor]:
+    """Match a free-text physician name (e.g. a care plan's assigned physician) to a doctor."""
+    if not name or not name.strip():
+        return None
+    wanted = name.strip().lower()
+    for doctor in await get_active_doctors(db):
+        if doctor.name.lower() == wanted:
+            return doctor
+    return None
+
+
+async def get_active_doctors(db: AsyncSession) -> List[Doctor]:
     result = await db.execute(
-        select(ClinicDoctor).where(ClinicDoctor.is_active == True).order_by(ClinicDoctor.id)
+        select(Doctor).where(Doctor.is_active == True).order_by(Doctor.id)
     )
     return list(result.scalars().all())
 
 
-def day_slots(doctor: ClinicDoctor, day: date) -> List[datetime]:
+def day_slots(doctor: Doctor, day: date) -> List[datetime]:
     """All slot start times for a doctor on a given day (ignores bookings)."""
     if day.weekday() not in (doctor.working_days or []):
         return []
@@ -127,11 +139,11 @@ async def _booked_starts(
     db: AsyncSession, doctor_ids: List[int], start: datetime, end: datetime
 ) -> Dict[int, set]:
     result = await db.execute(
-        select(ClinicAppointment.doctor_id, ClinicAppointment.start_at).where(
-            ClinicAppointment.doctor_id.in_(doctor_ids),
-            ClinicAppointment.status == "booked",
-            ClinicAppointment.start_at >= start,
-            ClinicAppointment.start_at < end,
+        select(Appointment.doctor_id, Appointment.start_at).where(
+            Appointment.doctor_id.in_(doctor_ids),
+            Appointment.status.in_(ACTIVE_STATUSES),
+            Appointment.start_at >= start,
+            Appointment.start_at < end,
         )
     )
     booked: Dict[int, set] = {doctor_id: set() for doctor_id in doctor_ids}
@@ -142,7 +154,7 @@ async def _booked_starts(
 
 async def get_free_slots(
     db: AsyncSession,
-    doctors: List[ClinicDoctor],
+    doctors: List[Doctor],
     days_ahead: Optional[int] = None,
 ) -> Dict[int, List[datetime]]:
     """Free slot start times per doctor id, from now until `days_ahead` days later."""
@@ -174,12 +186,14 @@ async def book_slot(
     patient_name: str,
     phone_number: str,
     reason: Optional[str] = None,
-    missed_call_id: Optional[int] = None,
-    clinic_call_id: Optional[int] = None,
-    booked_via: str = "agent",
-) -> ClinicAppointment:
+    call_log_id: Optional[int] = None,
+    source: str = SOURCE_AGENT,
+    patient_id: Optional[int] = None,
+    plan_id: Optional[int] = None,
+    status: str = "booked",
+) -> Appointment:
     """Book a slot after validating it is a real, future, free slot for that doctor."""
-    doctor = await db.get(ClinicDoctor, doctor_id)
+    doctor = await db.get(Doctor, doctor_id)
     if not doctor or not doctor.is_active:
         raise BookingError("Doctor not found")
 
@@ -190,26 +204,27 @@ async def book_slot(
         raise BookingError("That time has already passed")
 
     clash = await db.execute(
-        select(ClinicAppointment.id).where(
-            ClinicAppointment.doctor_id == doctor_id,
-            ClinicAppointment.start_at == start_at,
-            ClinicAppointment.status == "booked",
+        select(Appointment.id).where(
+            Appointment.doctor_id == doctor_id,
+            Appointment.start_at == start_at,
+            Appointment.status.in_(ACTIVE_STATUSES),
         )
     )
     if clash.scalar_one_or_none() is not None:
         raise BookingError("That slot is already booked")
 
-    appointment = ClinicAppointment(
+    appointment = Appointment(
         doctor_id=doctor_id,
-        missed_call_id=missed_call_id,
-        clinic_call_id=clinic_call_id,
+        call_log_id=call_log_id,
+        patient_id=patient_id,
+        plan_id=plan_id,
         patient_name=patient_name or "Unknown",
         phone_number=phone_number,
         reason=reason,
         start_at=start_at,
         end_at=start_at + timedelta(minutes=doctor.slot_minutes),
-        status="booked",
-        booked_via=booked_via,
+        status=status,
+        source=source,
     )
     db.add(appointment)
     await db.flush()

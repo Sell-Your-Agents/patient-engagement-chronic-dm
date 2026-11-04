@@ -1,15 +1,36 @@
+"""
+Initial database seed (runs only if the DB has no chronic conditions yet).
+
+Data seeded at start:
+  1. Demo care team user
+       - Demo Care Manager | test@hospital.com | password: TestPass123! | role: care_manager
+  2. Chronic conditions (4)
+       - T2DM (Type 2 Diabetes Mellitus), HTN (Hypertension),
+         COPD (Chronic Obstructive Pulmonary Disease), ASTHMA (Asthma)
+  3. Disease protocols (4) - one per condition, loaded from app.knowledge.seed_protocols
+  4. Demo patients (5), all active, enrolled now:
+       - PT001 Sruthi Punnana   (en) -> T2DM
+       - PT002 Maria Garcia     (es) -> HTN
+       - PT003 Robert Chen      (en) -> COPD
+       - PT004 Patricia Williams(en) -> Asthma
+       - PT005 James Brown      (en) -> T2DM
+  5. Patient conditions (5) - one primary, moderate-severity, active condition per patient
+  6. Care plans (5) - one per patient, linked to the condition's protocol,
+       follow-up interval from the protocol, first due in 7 days,
+       assigned physician "Dr. Ananya Rao"
+"""
 import asyncio
 import sys
 from datetime import datetime, timedelta
 from sqlalchemy import select
 
 from app.database import AsyncSessionLocal, init_db
-from app.models.care_team_user import CareTeamUser
+from app.models.user import User
 from app.models.condition import ChronicCondition
 from app.models.disease_protocol import DiseaseProtocol
 from app.models.patient import Patient
 from app.models.condition import PatientCondition
-from app.models.care_plan import CarePlan
+from app.models.plan import Plan
 from app.knowledge.seed_protocols import (
     DIABETES_PROTOCOL,
     HYPERTENSION_PROTOCOL,
@@ -32,7 +53,7 @@ async def seed_database():
             return
 
         # Seed demo care team user
-        demo_user = CareTeamUser(
+        demo_user = User(
             name="Demo Care Manager",
             email="test@hospital.com",
             hashed_password=hash_password("TestPass123!"),
@@ -79,8 +100,8 @@ async def seed_database():
         demo_patients = [
             {
                 "mrn": "PT001",
-                "first_name": "John",
-                "last_name": "Smith",
+                "first_name": "Sruthi",
+                "last_name": "Punnana",
                 "phone_number": "+1234567890",
                 "preferred_language": "en",
                 "status": "active",
@@ -132,7 +153,7 @@ async def seed_database():
             patients.append(patient)
             print(f"✓ Added patient: {patient.first_name} {patient.last_name}")
 
-        # Link patients to conditions and create care plans
+        # Link patients to conditions and create plans
         patient_condition_map = [
             (patients[0].id, conditions["T2DM"].id),    # John - Diabetes
             (patients[1].id, conditions["HTN"].id),     # Maria - Hypertension
@@ -161,18 +182,18 @@ async def seed_database():
             )
             protocol = proto_result.scalar_one()
 
-            # Create care plan
-            care_plan = CarePlan(
+            # Create plan
+            plan = Plan(
                 patient_id=patient_id,
                 patient_condition_id=pc.id,
                 protocol_id=protocol.id,
                 followup_interval_days=protocol.default_followup_interval_days,
                 next_due_date=datetime.utcnow() + timedelta(days=7),
                 status="active",
-                assigned_physician_name="Dr. Sample",
+                assigned_physician_name="Dr. Ananya Rao",
             )
-            db.add(care_plan)
-            print(f"✓ Created care plan for patient {patient_id}")
+            db.add(plan)
+            print(f"✓ Created plan for patient {patient_id}")
 
         await db.commit()
         print("\n✓ Database seeding complete!")

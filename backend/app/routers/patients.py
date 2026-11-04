@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.patient import Patient
 from app.deps import get_current_user
-from app.models.care_team_user import CareTeamUser
+from app.models.user import User
 
 router = APIRouter(prefix="/api/patients", tags=["patients"])
 
@@ -43,7 +43,7 @@ class PatientResponse(BaseModel):
 @router.get("/", response_model=List[PatientResponse])
 async def list_patients(
     db: AsyncSession = Depends(get_db),
-    _current_user: CareTeamUser = Depends(get_current_user),
+    _current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(select(Patient).limit(100))
     patients = result.scalars().all()
@@ -54,7 +54,7 @@ async def list_patients(
 async def create_patient(
     patient_data: PatientCreate,
     db: AsyncSession = Depends(get_db),
-    _current_user: CareTeamUser = Depends(get_current_user),
+    _current_user: User = Depends(get_current_user),
 ):
     new_patient = Patient(**patient_data.dict())
     db.add(new_patient)
@@ -67,7 +67,7 @@ async def create_patient(
 async def get_patient(
     patient_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: CareTeamUser = Depends(get_current_user),
+    _current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(select(Patient).where(Patient.id == patient_id))
     patient = result.scalar_one_or_none()
@@ -81,7 +81,7 @@ async def update_patient(
     patient_id: int,
     patient_data: PatientUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: CareTeamUser = Depends(get_current_user),
+    _current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(select(Patient).where(Patient.id == patient_id))
     patient = result.scalar_one_or_none()

@@ -36,7 +36,8 @@ export function EscalationQueuePage() {
   if (error) return <ErrorState text="Error loading escalations" />
 
   const patientById = new Map(patients?.map((p) => [p.id, p]) || [])
-  const patientName = (id: number) => {
+  const patientName = (id: number | null) => {
+    if (id === null) return 'Unknown caller'
     const p = patientById.get(id)
     return p ? `${p.first_name} ${p.last_name}` : `Patient #${id}`
   }
@@ -80,7 +81,7 @@ export function EscalationQueuePage() {
                 <span className="flex items-center gap-1">
                   <Icon name="clock" className="h-3.5 w-3.5" /> Created {formatDate(escalation.created_at)}
                 </span>
-                <span>Call #{escalation.outreach_call_id}</span>
+                <span>Call #{escalation.call_log_id}</span>
               </div>
             </div>
           ))}

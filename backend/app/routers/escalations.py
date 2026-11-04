@@ -7,16 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models.care_team_user import CareTeamUser
-from app.models.escalation_case import EscalationCase
+from app.models.user import User
+from app.models.escalation import Escalation
 
 router = APIRouter(prefix="/api/escalations", tags=["escalations"])
 
 
 class EscalationResponse(BaseModel):
     id: int
-    outreach_call_id: int
-    patient_id: int
+    call_log_id: int
+    patient_id: Optional[int]
     reason: str
     severity: str
     status: str
@@ -39,20 +39,20 @@ class EscalationUpdateRequest(BaseModel):
 @router.get("/", response_model=List[EscalationResponse])
 async def list_escalations(
     db: AsyncSession = Depends(get_db),
-    _: CareTeamUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     status: Optional[str] = Query(None),
     severity: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
 ) -> List[EscalationResponse]:
     """List escalation cases with optional filters."""
-    query = select(EscalationCase)
+    query = select(Escalation)
 
     if status:
-        query = query.where(EscalationCase.status == status)
+        query = query.where(Escalation.status == status)
 
     if severity:
-        query = query.where(EscalationCase.severity == severity)
+        query = query.where(Escalation.severity == severity)
 
     query = query.offset(skip).limit(limit)
     result = await db.execute(query)
@@ -65,11 +65,11 @@ async def list_escalations(
 async def get_escalation(
     id: int,
     db: AsyncSession = Depends(get_db),
-    _: CareTeamUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ) -> EscalationResponse:
     """Get details of a specific escalation case."""
     result = await db.execute(
-        select(EscalationCase).where(EscalationCase.id == id)
+        select(Escalation).where(Escalation.id == id)
     )
     case = result.scalar_one_or_none()
 
@@ -84,11 +84,11 @@ async def update_escalation(
     id: int,
     request: EscalationUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: CareTeamUser = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> EscalationResponse:
     """Update an escalation case (assign, resolve, etc.)."""
     result = await db.execute(
-        select(EscalationCase).where(EscalationCase.id == id)
+        select(Escalation).where(Escalation.id == id)
     )
     case = result.scalar_one_or_none()
 
@@ -118,25 +118,25 @@ async def update_escalation(
 @router.get("/stats/summary", response_model=dict)
 async def escalation_stats(
     db: AsyncSession = Depends(get_db),
-    _: CareTeamUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ) -> dict:
     """Get escalation statistics."""
     from sqlalchemy import func
 
     # Total escalations
-    total_result = await db.execute(select(func.count(EscalationCase.id)))
+    total_result = await db.execute(select(func.count(Escalation.id)))
     total = total_result.scalar() or 0
 
     # Open escalations
     open_result = await db.execute(
-        select(func.count(EscalationCase.id)).where(EscalationCase.status == "open")
+        select(func.count(Escalation.id)).where(Escalation.status == "open")
     )
     open_count = open_result.scalar() or 0
 
     # Urgent severity
     urgent_result = await db.execute(
-        select(func.count(EscalationCase.id)).where(
-            EscalationCase.severity == "urgent"
+        select(func.count(Escalation.id)).where(
+            Escalation.severity == "urgent"
         )
     )
     urgent_count = urgent_result.scalar() or 0

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models.care_team_user import CareTeamUser
+from app.models.user import User
 from app.models.medication_reminder import MedicationReminder
 
 router = APIRouter(prefix="/api/medication-reminders", tags=["medication_reminders"])
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/medication-reminders", tags=["medication_reminde
 class MedicationReminderResponse(BaseModel):
     id: int
     patient_id: int
-    care_plan_id: Optional[int]
+    plan_id: Optional[int]
     medication_name: str
     refill_due_date: datetime
     status: str
@@ -29,7 +29,7 @@ class MedicationReminderResponse(BaseModel):
 
 class MedicationReminderCreateRequest(BaseModel):
     patient_id: int
-    care_plan_id: Optional[int] = None
+    plan_id: Optional[int] = None
     medication_name: str
     refill_due_date: datetime
 
@@ -42,7 +42,7 @@ class MedicationReminderUpdateRequest(BaseModel):
 @router.get("/", response_model=List[MedicationReminderResponse])
 async def list_medication_reminders(
     db: AsyncSession = Depends(get_db),
-    _: CareTeamUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     patient_id: Optional[int] = Query(None),
     status: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
@@ -68,12 +68,12 @@ async def list_medication_reminders(
 async def create_medication_reminder(
     request: MedicationReminderCreateRequest,
     db: AsyncSession = Depends(get_db),
-    _: CareTeamUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ) -> MedicationReminderResponse:
     """Create a medication reminder."""
     reminder = MedicationReminder(
         patient_id=request.patient_id,
-        care_plan_id=request.care_plan_id,
+        plan_id=request.plan_id,
         medication_name=request.medication_name,
         refill_due_date=request.refill_due_date,
         status="upcoming",
@@ -89,7 +89,7 @@ async def create_medication_reminder(
 async def get_medication_reminder(
     id: int,
     db: AsyncSession = Depends(get_db),
-    _: CareTeamUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ) -> MedicationReminderResponse:
     """Get medication reminder details."""
     result = await db.execute(
@@ -108,7 +108,7 @@ async def update_medication_reminder(
     id: int,
     request: MedicationReminderUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    _: CareTeamUser = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ) -> MedicationReminderResponse:
     """Update a medication reminder."""
     result = await db.execute(

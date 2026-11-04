@@ -1,15 +1,10 @@
 import asyncio
-import json
-import base64
-import re
-import time
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
-from app.models.outreach_call import OutreachCall, ConversationTurn
-from app.services.stt_service import SarvamStream
+from app.models.call_log import CallLog, CallTurn
+from app.services.stt_service import DeepgramStream
 from app.services.sarvam_tts_service import SarvamTTSService
 from app.services.claude_service import stream_conversation
 from app.services.audio_utils import encode_mulaw_for_twilio
@@ -25,7 +20,7 @@ class CallSession:
         self.ws = websocket
         self.call_sid = call_sid
         self.stream_sid: Optional[str] = None
-        self.sarvam_stt: Optional[SarvamStream] = None
+        self.deepgram_stt: Optional[DeepgramStream] = None
         self.sarvam_tts = SarvamTTSService()
 
         self.selected_digit = "3"  # English
@@ -42,7 +37,7 @@ class CallSession:
         self.conversation_history = []
         self.transcript_text = ""
         self.system_prompt = ""
-        self.outreach_call = None
+        self.call: Optional[CallLog] = None
         self.db: Optional[AsyncSession] = None
 
     async def send_audio_to_caller(self, mulaw_bytes: bytes) -> None:
@@ -109,9 +104,9 @@ class CallSession:
         self.transcript_text += f"{role.upper()}: {content}\n"
 
         # Persist to DB
-        if self.db and self.outreach_call:
-            turn = ConversationTurn(
-                outreach_call_id=self.outreach_call.id,
+        if self.db and self.call:
+            turn = CallTurn(
+                call_log_id=self.call.id,
                 role=role,
                 content=content,
                 timestamp=datetime.utcnow(),
@@ -249,8 +244,8 @@ class CallSession:
         self.is_call_active = False
         if self._llm_task and not self._llm_task.done():
             self._llm_task.cancel()
-        if self.sarvam_stt:
-            await self.sarvam_stt.stop()
+        if self.deepgram_stt:
+            await self.deepgram_stt.stop()
         if self.sarvam_tts:
             await self.sarvam_tts.close(call_sid=self.call_sid)
         if self.db:

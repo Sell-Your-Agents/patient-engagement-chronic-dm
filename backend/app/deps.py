@@ -5,7 +5,7 @@ from sqlalchemy import select
 import logging
 from app.database import get_db
 from app.security import decode_access_token
-from app.models.care_team_user import CareTeamUser
+from app.models.user import User
 from jose import JWTError
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)
-) -> CareTeamUser:
+) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -33,7 +33,7 @@ async def get_current_user(
         logger.warning(f"JWT Error: {e}")
         raise credentials_exception
 
-    result = await db.execute(select(CareTeamUser).where(CareTeamUser.id == user_id))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     logger.debug(f"User from DB: {user}")
     if user is None or not user.is_active:
@@ -44,7 +44,7 @@ async def get_current_user(
 
 
 def require_role(*roles: str):
-    async def check_role(current_user: CareTeamUser = Depends(get_current_user)):
+    async def check_role(current_user: User = Depends(get_current_user)):
         if current_user.role not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

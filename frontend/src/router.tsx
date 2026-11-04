@@ -6,13 +6,9 @@ import { PatientListPage } from './pages/PatientListPage'
 import { PatientDetailPage } from './pages/PatientDetailPage'
 import { EscalationQueuePage } from './pages/EscalationQueuePage'
 import { EscalationDetailPage } from './pages/EscalationDetailPage'
-import { AppointmentListPage } from './pages/AppointmentListPage'
-import { OutreachCallListPage } from './pages/OutreachCallListPage'
-import { ClinicDashboardPage } from './pages/clinic/ClinicDashboardPage'
-import { MissedCallsPage } from './pages/clinic/MissedCallsPage'
-import { ClinicCallsPage } from './pages/clinic/ClinicCallsPage'
-import { ClinicAppointmentsPage } from './pages/clinic/ClinicAppointmentsPage'
-import { DoctorsPage } from './pages/clinic/DoctorsPage'
+import { AppointmentsPage } from './pages/AppointmentsPage'
+import { CallsPage } from './pages/CallsPage'
+import { DoctorsPage } from './pages/DoctorsPage'
 import { ROUTER_BASEPATH } from './lib/paths'
 
 // Root route
@@ -67,44 +63,20 @@ const escalationDetailRoute = new Route({
 const appointmentListRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/appointments',
-  component: AppointmentListPage,
+  component: AppointmentsPage,
 })
 
-// Outreach Calls
+// Calls (inbound + outbound)
 const callListRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/calls',
-  component: OutreachCallListPage,
+  component: CallsPage,
 })
 
-// Missed-call callback agent
-const clinicDashboardRoute = new Route({
+// Doctors
+const doctorsRoute = new Route({
   getParentRoute: () => rootRoute,
-  path: '/clinic',
-  component: ClinicDashboardPage,
-})
-
-const clinicMissedCallsRoute = new Route({
-  getParentRoute: () => rootRoute,
-  path: '/clinic/missed-calls',
-  component: MissedCallsPage,
-})
-
-const clinicCallsRoute = new Route({
-  getParentRoute: () => rootRoute,
-  path: '/clinic/calls',
-  component: ClinicCallsPage,
-})
-
-const clinicAppointmentsRoute = new Route({
-  getParentRoute: () => rootRoute,
-  path: '/clinic/appointments',
-  component: ClinicAppointmentsPage,
-})
-
-const clinicDoctorsRoute = new Route({
-  getParentRoute: () => rootRoute,
-  path: '/clinic/doctors',
+  path: '/doctors',
   component: DoctorsPage,
 })
 
@@ -118,11 +90,7 @@ const routeTree = rootRoute.addChildren([
   escalationDetailRoute,
   appointmentListRoute,
   callListRoute,
-  clinicDashboardRoute,
-  clinicMissedCallsRoute,
-  clinicCallsRoute,
-  clinicAppointmentsRoute,
-  clinicDoctorsRoute,
+  doctorsRoute,
 ])
 
 // Create router

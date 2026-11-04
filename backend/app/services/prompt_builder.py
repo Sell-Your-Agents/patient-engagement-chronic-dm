@@ -1,12 +1,11 @@
-from datetime import datetime
 from app.models.patient import Patient
-from app.models.care_plan import CarePlan
+from app.models.plan import Plan
 from app.models.disease_protocol import DiseaseProtocol
 
 
 def build_system_prompt(
     patient: Patient,
-    care_plan: CarePlan,
+    plan: Plan,
     protocol: DiseaseProtocol,
     agent_name: str = "HealthCoach",
     org_name: str = "Patient Engagement Center",
@@ -44,8 +43,8 @@ def build_system_prompt(
 
     # Get condition name
     condition_name = "Unknown"
-    if care_plan and care_plan.patient_condition:
-        condition_name = care_plan.patient_condition.chronic_condition.display_name
+    if plan and plan.patient_condition:
+        condition_name = plan.patient_condition.chronic_condition.display_name
 
     prompt = f"""You are {agent_name}, a compassionate and professional health coaching AI calling on behalf of {org_name}.
 Your role is to support patients managing chronic conditions through proactive engagement.
@@ -57,9 +56,9 @@ PATIENT INFORMATION:
 
 CONDITION & CARE PLAN:
 - Condition: {condition_name}
-- Assigned Physician: {care_plan.assigned_physician_name}
-- Last Outreach: {care_plan.last_outreach_at.strftime('%B %d, %Y') if care_plan.last_outreach_at else 'First contact'}
-- Follow-up Interval: Every {care_plan.followup_interval_days} days
+- Assigned Physician: {plan.assigned_physician_name}
+- Last Outreach: {plan.last_outreach_at.strftime('%B %d, %Y') if plan.last_outreach_at else 'First contact'}
+- Follow-up Interval: Every {plan.followup_interval_days} days
 
 CONVERSATION FLOW:
 You will guide this conversation through the following stages:

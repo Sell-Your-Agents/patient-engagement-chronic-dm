@@ -3,8 +3,8 @@ import { apiClient } from '../lib/apiClient'
 
 export interface Escalation {
   id: number
-  outreach_call_id: number
-  patient_id: number
+  call_log_id: number
+  patient_id: number | null
   reason: string
   severity: string
   status: string

@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { useKpis } from '../hooks/useKpis'
+import { useClinicStats } from '../hooks/useClinic'
 import { useAuthStore } from '../store/authStore'
 import { Icon, type IconName } from '../components/Icon'
 import { PageHeader, StatCard, Loader, ErrorState } from '../components/ui'
@@ -20,6 +21,7 @@ const FEATURES: { icon: IconName; label: string }[] = [
 
 export function DashboardPage() {
   const { data: kpis, isLoading, error } = useKpis()
+  const { data: inbound } = useClinicStats()
   const { user } = useAuthStore()
 
   if (isLoading) return <Loader text="Loading KPIs..." />
@@ -57,6 +59,21 @@ export function DashboardPage() {
         <StatCard label="Confirmed Appts" value={kpis.confirmed_appointments} icon="calendar" tint="lavender" />
         <StatCard label="Calls With Warnings" value={kpis.calls_with_warnings} icon="alert" tint="coral" />
       </div>
+
+      {/* Inbound call agent */}
+      {inbound && (
+        <>
+          <SectionLabel className="mt-5">Inbound Calls & Bookings</SectionLabel>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <StatCard label="Inbound Calls" value={inbound.total_calls} icon="phoneCall" tint="sky" />
+            <StatCard label="Known Patients" value={inbound.known_patient_calls} icon="users" tint="coral" />
+            <StatCard label="Completed" value={inbound.calls_completed} icon="checkCircle" tint="amber" />
+            <StatCard label="Booked" value={inbound.appointments_booked} icon="calendar" tint="mint" />
+            <StatCard label="Today" value={inbound.appointments_today} icon="activity" tint="lavender" />
+            <StatCard label="Conversion" value={`${inbound.conversion_rate}%`} icon="trending" tint="peach" />
+          </div>
+        </>
+      )}
 
       {/* Active issues */}
       <Link

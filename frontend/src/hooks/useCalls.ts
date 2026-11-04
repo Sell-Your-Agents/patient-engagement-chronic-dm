@@ -1,18 +1,29 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '../lib/apiClient'
 
-export interface OutreachCall {
+export type CallDirection = 'inbound' | 'outbound'
+
+export interface Call {
   id: number
-  patient_id: number
-  care_plan_id: number | null
+  direction: CallDirection
+  phone_number: string | null
+  patient_id: number | null
+  patient_name: string | null
+  plan_id: number | null
   call_sid: string | null
   status: string
-  started_at: string | null
-  ended_at: string | null
+  reason: string | null
+  urgency: string | null
+  outcome: string | null
+  summary: string | null
   transcript: string | null
   warning_signs_detected: boolean
   medication_adherence_reported: string | null
   csat_score: number | null
+  started_at: string | null
+  ended_at: string | null
+  duration_seconds: number | null
+  created_at: string
 }
 
 export interface CallStats {
@@ -23,27 +34,19 @@ export interface CallStats {
   average_csat: number | null
 }
 
-export function useOutreachCalls(patientId?: number) {
+export function useCalls(params: { direction?: CallDirection; patient_id?: number } = {}) {
   return useQuery({
-    queryKey: ['outreach-calls', patientId],
-    queryFn: async () => {
-      const data = (await apiClient.listOutreachCalls(0, 100)) as OutreachCall[]
-      if (patientId) {
-        return data.filter((call) => call.patient_id === patientId)
-      }
-      return data
-    },
-    refetchInterval: 60000, // Refetch every minute
+    queryKey: ['calls', params],
+    queryFn: async () => (await apiClient.listCalls({ ...params, limit: 500 })) as Call[],
+    // Call activity changes quickly while a call is live
+    refetchInterval: 5000,
   })
 }
 
-export function useCallStats() {
+export function useCallStats(direction?: CallDirection) {
   return useQuery({
-    queryKey: ['call-stats'],
-    queryFn: async () => {
-      const data = await apiClient.getCallStats()
-      return data as CallStats
-    },
+    queryKey: ['calls', 'stats', direction],
+    queryFn: async () => (await apiClient.getCallStats(direction)) as CallStats,
     refetchInterval: 60000,
   })
 }

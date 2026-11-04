@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { usePatient, useInitiateCall } from '../hooks/usePatients'
-import { useOutreachCalls } from '../hooks/useOutreachCalls'
+import { useCalls } from '../hooks/useCalls'
 import { useAppointments } from '../hooks/useAppointments'
 import { Icon } from '../components/Icon'
 import {
@@ -21,8 +21,8 @@ export function PatientDetailPage() {
   const { id } = useParams({ strict: false }) as { id?: string }
   const patientId = Number(id)
   const { data: patient, isLoading, error } = usePatient(patientId)
-  const { data: calls } = useOutreachCalls(patientId)
-  const { data: appointments } = useAppointments()
+  const { data: calls } = useCalls({ patient_id: patientId })
+  const { data: appointments } = useAppointments({ patient_id: patientId })
   const { mutate: initiateCall, isPending } = useInitiateCall()
   const [callMessage, setCallMessage] = useState<{ ok: boolean; text: string } | null>(null)
   const [callPage, setCallPage] = useState(1)
@@ -30,7 +30,7 @@ export function PatientDetailPage() {
   if (isLoading) return <Loader text="Loading patient..." />
   if (error || !patient) return <ErrorState text="Error loading patient" />
 
-  const patientAppointments = appointments?.filter((a) => a.patient_id === patientId) || []
+  const patientAppointments = appointments || []
   const pagedCalls = paginate(calls || [], callPage, setCallPage, 5)
 
   const startCall = () => {
@@ -101,10 +101,10 @@ export function PatientDetailPage() {
                   {patientAppointments.slice(0, 3).map((a) => (
                     <div key={a.id} className="clay-inset rounded-2xl px-3 py-2.5">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="truncate text-sm font-bold text-ink">{a.physician_name}</p>
+                        <p className="truncate text-sm font-bold text-ink">{a.doctor_name}</p>
                         <StatusBadge status={a.status} />
                       </div>
-                      <p className="mt-0.5 text-xs text-ink-soft">{formatShortDateTime(a.scheduled_at)}</p>
+                      <p className="mt-0.5 text-xs text-ink-soft">{a.start_at ? formatShortDateTime(a.start_at) : 'To be scheduled'}</p>
                     </div>
                   ))}
                 </div>
