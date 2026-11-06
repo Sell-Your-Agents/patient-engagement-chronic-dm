@@ -12,8 +12,8 @@ from sqlalchemy.orm import joinedload
 from app.database import get_db
 from app.config import get_settings
 from app.models.call_log import CallLog, DIRECTION_OUTBOUND
-from app.services.call_agent import run_call_stream
-from app.services.callback_service import find_callback_for_call, mark_callback_call_ended
+from app.services.agent.call_agent import run_call_stream
+from app.services.scheduling.callback_service import find_callback_for_call, mark_callback_call_ended
 from app.services.public_url import public_request_url, public_ws_url
 
 logger = logging.getLogger(__name__)

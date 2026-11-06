@@ -4,10 +4,10 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.call_log import CallLog, CallTurn
-from app.services.stt_service import DeepgramStream
-from app.services.sarvam_tts_service import SarvamTTSService
-from app.services.claude_service import stream_conversation
-from app.services.audio_utils import encode_mulaw_for_twilio
+from app.services.voice.stt_service import DeepgramStream
+from app.services.voice.sarvam_tts_service import SarvamTTSService
+from app.services.agent.claude_service import stream_conversation
+from app.services.voice.audio_utils import encode_mulaw_for_twilio
 import logging
 
 logger = logging.getLogger(__name__)

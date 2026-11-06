@@ -11,12 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.deps import get_current_user
+from app.auth.deps import get_current_user
 from app.models.user import User
 from app.models.appointment import Appointment
 from app.models.call_log import CallLog, DIRECTION_INBOUND
 from app.models.doctor import Doctor
-from app.services.clinic_scheduling import (
+from app.services.scheduling.clinic_scheduling import (
     clinic_now,
     get_free_slots,
 )

@@ -40,18 +40,18 @@ async def lifespan(app: FastAPI):
 
     # Demo doctors shared by both agents (only inserted once)
     from app.database import AsyncSessionLocal
-    from app.services.clinic_scheduling import seed_clinic_doctors
+    from app.services.scheduling.clinic_scheduling import seed_clinic_doctors
 
     async with AsyncSessionLocal() as db:
         await seed_clinic_doctors(db)
 
     # Call people back when the callback they asked for falls due
-    from app.services.callback_service import run_callback_dialer
+    from app.services.scheduling.callback_service import run_callback_dialer
 
     callback_dialer = asyncio.create_task(run_callback_dialer())
 
     # Health check-in calls when a care plan's follow-up interval comes round
-    from app.services.checkin_dialer import run_checkin_dialer
+    from app.services.scheduling.checkin_dialer import run_checkin_dialer
 
     checkin_dialer = asyncio.create_task(run_checkin_dialer()) if settings.checkin_dialer_enabled else None
 

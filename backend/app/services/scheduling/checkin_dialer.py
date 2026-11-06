@@ -23,8 +23,8 @@ from app.models.disease_protocol import DiseaseProtocol
 from app.models.escalation import Escalation
 from app.models.patient import Patient
 from app.models.plan import Plan
-from app.services.callback_service import place_agent_call, twilio_configured
-from app.services.clinic_scheduling import clinic_now, followup_minutes, next_followup_due
+from app.services.scheduling.callback_service import place_agent_call, twilio_configured
+from app.services.scheduling.clinic_scheduling import clinic_now, followup_minutes, next_followup_due
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

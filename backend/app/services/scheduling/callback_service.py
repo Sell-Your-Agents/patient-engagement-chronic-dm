@@ -29,7 +29,7 @@ from app.models.callback_schedule import (
     SCHEDULE_TYPE_STAFF,
 )
 from app.models.patient import Patient
-from app.services.clinic_scheduling import clinic_now
+from app.services.scheduling.clinic_scheduling import clinic_now
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

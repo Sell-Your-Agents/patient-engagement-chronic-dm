@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from app.database import get_db
 from app.models.plan import Plan
-from app.deps import get_current_user
+from app.auth.deps import get_current_user
 from app.models.user import User
 
 router = APIRouter(prefix="/api/plans", tags=["plans"])

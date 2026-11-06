@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.models.appointment import Appointment, SOURCE_AGENT
 from app.models.patient import Patient
-from app.services.clinic_scheduling import book_slot, find_doctor_by_name, get_free_slots
+from app.services.scheduling.clinic_scheduling import book_slot, find_doctor_by_name, get_free_slots
 
 
 class AppointmentService:

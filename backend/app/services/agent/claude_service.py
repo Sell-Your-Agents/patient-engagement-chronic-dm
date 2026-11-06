@@ -3,6 +3,7 @@ import json
 import logging
 from typing import List, Optional, Tuple
 from app.config import get_settings
+from app.prompts.prompts import CALL_SUMMARY_PROMPT
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -106,37 +107,7 @@ async def finalize_call_summary(
         warning_signs_detected, warning_sign_details, appointment_requested, csat_score
     """
 
-    extraction_prompt = f"""You are analyzing a phone call handled by a clinic's AI agent. It was either an outbound health check-in with an enrolled patient or an inbound call to the clinic. Extract structured information.
-
-{system_context}
-
-TRANSCRIPT:
-{transcript}
-
-Return a JSON object with exactly these fields (use null when something does not apply to this call):
-{{
-  "patient_name": "full name of the patient, or null",
-  "reason": "short phrase describing why the call happened / their problem, or null",
-  "symptoms": ["list", "of", "symptoms"],
-  "urgency": "routine|soon|urgent|emergency",
-  "outcome": "booked|appointment_requested|check_in_completed|declined|info_only|call_later|wrong_number|no_conversation",
-  "summary": "2-3 sentence summary of the call",
-  "sentiment": "positive|neutral|negative",
-  "symptom_status": "stable|worsening|improving|unknown",
-  "medication_adherence": "excellent|good|fair|poor|unknown, or null if not discussed",
-  "warning_signs_detected": true|false,
-  "warning_sign_details": "description of red flags or null",
-  "appointment_requested": true|false,
-  "appointment_details": "details about appointment request or null",
-  "callback_requested": true|false,
-  "callback_time": "YYYY-MM-DDTHH:MM in clinic local time the caller asked to be called back, or null if no time was agreed",
-  "callback_reason": "short phrase why they want a callback, or null",
-  "csat_score": 1-5 or null
-}}
-
-Be conservative: only set warning_signs_detected=true if the patient clearly reported concerning symptoms.
-Set callback_requested=true only if the caller asked the clinic to call them back later (e.g. "can you call me back", "call me tomorrow evening"); resolve relative times like "tomorrow at 5" against the current clinic date/time.
-"""
+    extraction_prompt = CALL_SUMMARY_PROMPT.format(system_context=system_context, transcript=transcript)
 
     try:
         response = client.messages.create(

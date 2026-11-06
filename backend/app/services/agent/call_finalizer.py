@@ -11,14 +11,14 @@ from app.models.disease_protocol import DiseaseProtocol
 from app.models.condition import PatientCondition
 from app.models.escalation import Escalation
 from app.models.callback_schedule import CallbackSchedule
-from app.services.claude_service import finalize_call_summary
-from app.services.callback_service import (
+from app.services.agent.claude_service import finalize_call_summary
+from app.services.scheduling.callback_service import (
     find_requested_callback,
     mark_callback_call_ended,
     parse_callback_time,
     schedule_requested_callback,
 )
-from app.services.clinic_scheduling import clinic_now, find_doctor_by_name, next_followup_due
+from app.services.scheduling.clinic_scheduling import clinic_now, find_doctor_by_name, next_followup_due
 
 
 async def finalize_call(

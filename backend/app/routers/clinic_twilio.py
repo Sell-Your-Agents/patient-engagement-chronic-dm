@@ -17,7 +17,7 @@ from app.database import get_db
 from app.config import get_settings
 from app.models.call_log import CallLog, DIRECTION_INBOUND
 from app.routers.twilio_webhook import apply_call_status
-from app.services.call_context import lookup_caller
+from app.services.agent.call_context import lookup_caller
 from app.services.public_url import public_request_url, public_ws_url
 
 logger = logging.getLogger(__name__)

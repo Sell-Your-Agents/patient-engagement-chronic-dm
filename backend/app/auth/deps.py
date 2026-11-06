@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import logging
 from app.database import get_db
-from app.security import decode_access_token
+from app.auth.security import decode_access_token
 from app.models.user import User
 from jose import JWTError
 

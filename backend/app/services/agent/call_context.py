@@ -9,8 +9,9 @@ decide the context:
 - outbound callback   -> calling back someone who asked for it: resumes the check-in if that is
                          what they were on, otherwise the receptionist
 
-Prompts stay separate modules (coaching content never leaks into the receptionist prompt for
-strangers); the capabilities set decides which control tokens the session will act on.
+All prompt text lives in app/prompts/prompts.py; this module only fills it in (coaching content
+never leaks into the receptionist prompt for strangers). The capabilities set decides which
+control tokens the session will act on.
 """
 import logging
 import re
@@ -28,14 +29,32 @@ from app.models.callback_schedule import CallbackSchedule, SCHEDULE_TYPE_STAFF
 from app.models.plan import Plan
 from app.models.condition import PatientCondition
 from app.models.patient import Patient
-from app.services.clinic_scheduling import (
+from app.services.scheduling.clinic_scheduling import (
     clinic_now,
     format_day,
     get_active_doctors,
     get_free_slots,
 )
-from app.services.callback_service import find_callback_for_call, find_source_call
-from app.services.prompt_builder import build_system_prompt
+from app.services.scheduling.callback_service import find_callback_for_call, find_source_call
+from app.prompts.chronic_prompt import build_system_prompt
+from app.prompts.prompts import (
+    CALLBACK_CHECKIN_GREETING,
+    CALLBACK_GREETING,
+    CALLBACK_INSTRUCTIONS,
+    CALLBACK_NOTE,
+    CALLER_HINT_CALLBACK_UNKNOWN,
+    CALLER_HINT_NAMED,
+    CALLER_HINT_PATIENT,
+    CALLER_HINT_UNKNOWN,
+    CARE_PLAN_BLOCK,
+    CHECKIN_GREETING,
+    CHRONIC_FALLBACK_PROMPT,
+    ESCALATION_TOKEN_BLOCK,
+    LIVE_CALL_SITUATION,
+    PREVIOUS_CONVERSATIONS,
+    RECEPTIONIST_GREETING,
+    RECEPTIONIST_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -155,13 +174,10 @@ async def build_call_context(db: AsyncSession, call: CallLog) -> CallContext:
             )
         else:
             name = patient.first_name if patient else "the patient"
-            prompt = f"You are {agent}, a friendly health coach calling {name} on behalf of {clinic}."
+            prompt = CHRONIC_FALLBACK_PROMPT.format(agent_name=agent, name=name, org_name=clinic)
         prompt += callback_instructions()
         who = f"Hello {patient.first_name}, " if patient else "Hello, "
-        greeting = (
-            f"{who}this is {agent} from {clinic}, calling for your regular health check-in. "
-            "How are you feeling today?"
-        )
+        greeting = CHECKIN_GREETING.format(hello=who, agent_name=agent, org_name=clinic)
         return CallContext(
             system_prompt=prompt,
             greeting=greeting,
@@ -174,7 +190,7 @@ async def build_call_context(db: AsyncSession, call: CallLog) -> CallContext:
     prompt = await build_receptionist_prompt(db, call.phone_number or "", patient, conditions, plan)
     prompt += callback_instructions()
     who = f"Hello {patient.first_name}, " if patient else "Hello, "
-    greeting = f"{who}thank you for calling {clinic}, this is {agent}. How can I help you today?"
+    greeting = RECEPTIONIST_GREETING.format(hello=who, agent_name=agent, org_name=clinic)
     capabilities = {CAP_BOOK, CAP_CALLBACK}
     if plan:
         capabilities.add(CAP_ESCALATE)
@@ -249,34 +265,14 @@ async def previous_conversations(db: AsyncSession, calls: Sequence[CallLog]) -> 
         block += f"\nConversation:\n{conversation or '(nothing was recorded)'}"
         blocks.append(block)
 
-    return (
-        "\nPREVIOUS CONVERSATION(S) WITH THIS PERSON (oldest first; \"You\" is you, the agent)\n"
-        + "\n\n".join(blocks)
-        + "\n\nUSE THIS HISTORY:\n"
-        "- You remember these calls. Pick up where the last one left off; briefly mention what you talked about.\n"
-        "- Do not ask again for anything they already told you (name, symptoms, answers to check-in questions, "
-        "preferred times). Only confirm it if it may have changed.\n"
-        "- Ask the questions that were still unanswered or that they wanted to talk about later.\n"
-        "- If something was already booked or arranged, do not book it again; just confirm it if asked.\n"
-    )
+    return PREVIOUS_CONVERSATIONS.format(blocks="\n\n".join(blocks))
 
 
 def callback_instructions() -> str:
     """Prompt section for the [[SCHEDULE_CALLBACK]] token (every call)."""
     now = clinic_now()
     example = (now + timedelta(days=1)).replace(hour=17, minute=30).strftime("%Y-%m-%dT%H:%M")
-    return f"""
-CALLBACK REQUESTS
-Current clinic date/time: {now.strftime('%A %d %b %Y, %I:%M %p')}.
-If the person asks you to call them back later (they are busy, driving, want to talk another time, etc.):
-- Ask what day and time suits them, unless they already said. Do not push if they cannot say.
-- Once they agree, include exactly one token like this in your reply:
-  [[SCHEDULE_CALLBACK when={example}; reason=busy at work, wants to finish the check-in]]
-  when: the agreed date and 24h time in clinic local time (YYYY-MM-DDTHH:MM); leave it empty (when=) if they gave no time.
-  reason: a short plain phrase without full stops.
-- The token is invisible to them; the system schedules the callback. Confirm the day and time back to them, then politely end the call.
-- If they change the time later in the call, write the token again with the new time.
-"""
+    return CALLBACK_INSTRUCTIONS.format(now=now.strftime('%A %d %b %Y, %I:%M %p'), example=example)
 
 
 async def build_callback_context(
@@ -314,20 +310,14 @@ async def build_callback_context(
     asked = (
         ". The clinic team asked you to call them back to follow up" if by_staff else " and asked to be called back"
     )
-    note = (
-        f"\nTHIS IS A CALLBACK\n{earlier}{asked}"
-        + (f" ({reason})" if reason else "")
-        + ". You are now calling them back and they have just answered."
-        + "\nIf now is still not a good time, offer to schedule another callback.\n"
-        + history
-    )
+    note = CALLBACK_NOTE.format(earlier=earlier, asked=asked, reason=f" ({reason})" if reason else "") + history
 
     # They were in the middle of a check-in: pick it up again
     if origin and origin.direction == DIRECTION_OUTBOUND and patient and plan and plan.protocol:
         prompt = build_system_prompt(patient=patient, plan=plan, protocol=plan.protocol, agent_name=agent, org_name=clinic)
         return CallContext(
             system_prompt=prompt + note + callback_instructions(),
-            greeting=f"{hello}this is {agent} from {clinic}, {why} so we can finish your health check-in. Is now a good time?",
+            greeting=CALLBACK_CHECKIN_GREETING.format(hello=hello, agent_name=agent, org_name=clinic, why=why),
             capabilities=frozenset({CAP_ESCALATE, CAP_APPOINTMENT_REQUEST, CAP_CALLBACK}),
             patient=patient,
             plan=plan,
@@ -343,7 +333,7 @@ async def build_callback_context(
         capabilities.add(CAP_ESCALATE)
     return CallContext(
         system_prompt=prompt + callback_instructions(),
-        greeting=f"{hello}this is {agent} from {clinic}, {why}{about}. Is now a good time to talk?",
+        greeting=CALLBACK_GREETING.format(hello=hello, agent_name=agent, org_name=clinic, why=why, about=about),
         capabilities=frozenset(capabilities),
         patient=patient,
         plan=plan,
@@ -364,13 +354,12 @@ def _plan_block(patient: Patient, plan: Plan, conditions: Sequence[str]) -> str:
         red_flags.append(f"  - {criterion['description']}{label} (severity: {criterion.get('severity', 'unknown')})")
     red_flag_text = "\n".join(red_flags) or "  - Any severe or rapidly worsening symptom"
     last = plan.last_outreach_at.strftime("%d %b %Y") if plan.last_outreach_at else "none yet"
-    return f"""
-CARE PLAN (this caller is enrolled in chronic-care follow-up)
-- Conditions: {', '.join(conditions) or 'not listed'}. Assigned physician: {plan.assigned_physician_name or 'not assigned'}. Last check-in call: {last}.
-- If the caller mentions any of these red flags, include the token [[ESCALATE:<id>]] once (e.g. [[ESCALATE:chest_pain]]; use a short snake_case id if none is given), tell them clearly to seek urgent care if it is serious, and still help them book a visit:
-{red_flag_text}
-- Never give clinical advice; defer to their physician.
-"""
+    return CARE_PLAN_BLOCK.format(
+        conditions=', '.join(conditions) or 'not listed',
+        physician=plan.assigned_physician_name or 'not assigned',
+        last_checkin=last,
+        red_flag_text=red_flag_text,
+    )
 
 
 async def build_receptionist_prompt(
@@ -404,66 +393,28 @@ async def build_receptionist_prompt(
         )
 
     if patient:
-        caller_hint = (
-            f"The caller's number matches an enrolled chronic-care patient: {patient.first_name} {patient.last_name}"
-            + (f", being followed for {', '.join(conditions)}" if conditions else "")
-            + ". Greet them by first name and confirm it is them before discussing anything. "
-            "You may mention their condition only to route them to the right doctor (e.g. diabetes or blood pressure "
-            "follow-up goes to the General Physician or Cardiologist); do not give clinical advice."
+        caller_hint = CALLER_HINT_PATIENT.format(
+            full_name=f"{patient.first_name} {patient.last_name}",
+            followed_for=f", being followed for {', '.join(conditions)}" if conditions else "",
         )
     elif caller_name:
-        caller_hint = f"This number is not in our patient records. On the earlier call they gave their name as {caller_name}; confirm it."
+        caller_hint = CALLER_HINT_NAMED.format(caller_name=caller_name)
     elif callback_note:
-        caller_hint = "This number is not in our patient records. Use their name if it appears in the previous conversation below; otherwise ask for it."
+        caller_hint = CALLER_HINT_CALLBACK_UNKNOWN
     else:
-        caller_hint = "This number is not in our patient records, so you do not know the caller's name yet."
+        caller_hint = CALLER_HINT_UNKNOWN
 
     care_block = _plan_block(patient, plan, conditions) if patient and plan else ""
-    escalate_token = (
-        "\nESCALATION TOKEN\n[[ESCALATE:<id>]] alerts the care team immediately. It is invisible to the caller. "
-        "Use it only for the red flags listed under CARE PLAN, once per red flag.\n"
-        if care_block
-        else ""
+    escalate_token = ESCALATION_TOKEN_BLOCK if care_block else ""
+
+    return RECEPTIONIST_PROMPT.format(
+        agent_name=settings.clinic_agent_name,
+        org_name=settings.clinic_name,
+        situation=callback_note or LIVE_CALL_SITUATION,
+        now=now.strftime('%A %d %b %Y, %I:%M %p'),
+        phone_number=phone_number,
+        caller_hint=caller_hint,
+        care_block=care_block,
+        doctor_blocks="\n".join(doctor_blocks),
+        escalate_token=escalate_token,
     )
-
-    return f"""You are {settings.clinic_agent_name}, a warm and professional receptionist answering the phone for {settings.clinic_name}.
-{callback_note or "You are on a live PHONE call. The person called the clinic and you have just picked up."}
-Current clinic date/time: {now.strftime('%A %d %b %Y, %I:%M %p')}.
-Caller phone: {phone_number}. {caller_hint}
-{care_block}
-YOUR GOAL
-1. Welcome them and ask how the clinic can help.
-2. Understand why they are calling: their main problem or symptoms, since when, and whether it is for themselves or someone else.
-3. Ask for the patient's full name (skip if you already know it and they confirmed).
-4. Choose the most suitable doctor from the list below based on the problem. Use the General Physician for general or unclear issues, fever, and routine BP or sugar check-ups.
-5. Offer two or three of that doctor's free slots (prefer the earliest ones) and let the caller choose. Never offer a time that is not in the list.
-6. Once the caller clearly agrees to a specific doctor and time, book it by writing the booking token (see below), then confirm the doctor's name, day, date and time back to them.
-7. Ask if there is anything else. Then thank them, say goodbye and end the call.
-
-If the caller only had a question (timings, location, fees), answer what you can, offer an appointment, and do not force a booking.
-If they do not want an appointment, politely close the call.
-
-EMERGENCY SAFETY
-If the caller describes severe chest pain, difficulty breathing, signs of stroke (face drooping, arm weakness, slurred speech), heavy bleeding, unconsciousness or a serious injury, tell them clearly to call 108 or go to the nearest emergency room immediately. You may still offer a follow-up appointment.
-Never diagnose or prescribe medicines.
-
-DOCTORS AND AVAILABILITY
-{chr(10).join(doctor_blocks)}
-
-BOOKING TOKEN
-When the caller agrees to a slot, include exactly one token like this in your reply:
-[[BOOK_APPOINTMENT doctor_id=1; start=2026-10-16T09:15; name=Ravi Kumar; reason=fever and body pain for 3 days]]
-- start must be the slot's date (YYYY-MM-DD) and 24h time from the list above.
-- name: the patient's full name only, no titles. reason: a short plain phrase without full stops.
-- The token is invisible to the caller; the system books the slot. If the slot turns out to be unavailable you will be told, so then offer another time.
-- Only book once per appointment. Never write the token before the caller has agreed.
-{escalate_token}
-ENDING THE CALL
-When the conversation is finished and you have said goodbye, add [[END_CALL]] at the very end of your final reply.
-
-SPEAKING STYLE
-- Speak naturally in English, like a friendly receptionist. Keep each reply to one to three short sentences.
-- Ask one question at a time. No lists, no markdown, no emojis.
-- When speaking, say "Doctor" instead of the abbreviation "Dr." (e.g. "Doctor Ananya Rao").
-- Say times like "nine fifteen in the morning" or "9:15 AM", and dates like "Thursday, 16th October".
-"""

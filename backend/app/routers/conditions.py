@@ -10,8 +10,8 @@ from app.models.condition import ChronicCondition, PatientCondition
 from app.models.disease_protocol import DiseaseProtocol
 from app.models.patient import Patient
 from app.models.plan import Plan
-from app.services.clinic_scheduling import at_clinic_time, next_followup_due
-from app.deps import get_current_user
+from app.services.scheduling.clinic_scheduling import at_clinic_time, next_followup_due
+from app.auth.deps import get_current_user
 from app.models.user import User
 
 router = APIRouter(prefix="/api/conditions", tags=["conditions"])

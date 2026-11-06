@@ -7,12 +7,12 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import get_current_user
+from app.auth.deps import get_current_user
 from app.models.user import User
 from app.models.appointment import Appointment
-from app.services.appointment_service import AppointmentService
+from app.services.scheduling.appointment_service import AppointmentService
 from app.config import get_settings
-from app.services.clinic_scheduling import BookingError, book_slot
+from app.services.scheduling.clinic_scheduling import BookingError, book_slot
 from app.routers.clinic import normalize_phone
 from app.models.appointment import SOURCE_STAFF
 

@@ -14,7 +14,7 @@ import twilio.rest
 
 from app.config import get_settings
 from app.database import get_db
-from app.deps import get_current_user
+from app.auth.deps import get_current_user
 from app.models.call_log import CallLog, CallTurn, DIRECTION_OUTBOUND
 from app.models.callback_schedule import (
     CallbackSchedule,
@@ -22,13 +22,13 @@ from app.models.callback_schedule import (
     CALLBACK_COMPLETED,
     CALLBACK_PENDING,
 )
-from app.services.callback_service import (
+from app.services.scheduling.callback_service import (
     CallbackBusyError,
     claim_callback,
     dial_callback,
     schedule_staff_callback,
 )
-from app.services.clinic_scheduling import clinic_now
+from app.services.scheduling.clinic_scheduling import clinic_now
 from app.models.patient import Patient
 from app.models.plan import Plan
 from app.models.user import User

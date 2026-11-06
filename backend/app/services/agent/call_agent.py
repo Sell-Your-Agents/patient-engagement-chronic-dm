@@ -26,8 +26,8 @@ from app.models.appointment import SOURCE_AGENT
 from app.models.call_log import CallLog
 from app.models.doctor import Doctor
 from app.models.escalation import Escalation
-from app.services.audio_utils import decode_twilio_payload
-from app.services.call_context import (
+from app.services.voice.audio_utils import decode_twilio_payload
+from app.services.agent.call_context import (
     CAP_APPOINTMENT_REQUEST,
     CAP_BOOK,
     CAP_CALLBACK,
@@ -35,11 +35,11 @@ from app.services.call_context import (
     CallContext,
     build_call_context,
 )
-from app.services.call_finalizer import finalize_call
-from app.services.callback_service import parse_callback_time, schedule_requested_callback
-from app.services.clinic_scheduling import BookingError, book_slot
-from app.services.stt_service import DeepgramStream
-from app.services.twilio_service import CallSession
+from app.services.agent.call_finalizer import finalize_call
+from app.services.scheduling.callback_service import parse_callback_time, schedule_requested_callback
+from app.services.scheduling.clinic_scheduling import BookingError, book_slot
+from app.services.voice.stt_service import DeepgramStream
+from app.services.voice.twilio_service import CallSession
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

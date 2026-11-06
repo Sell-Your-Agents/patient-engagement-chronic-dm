@@ -37,7 +37,7 @@ from app.knowledge.seed_protocols import (
     COPD_PROTOCOL,
     ASTHMA_PROTOCOL,
 )
-from app.security import hash_password
+from app.auth.security import hash_password
 
 
 async def seed_database():

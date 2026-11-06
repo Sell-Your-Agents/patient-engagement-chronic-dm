@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
 from app.database import get_db
-from app.deps import get_current_user
+from app.auth.deps import get_current_user
 from app.models.user import User
 from app.models.call_log import CallLog, DIRECTION_OUTBOUND
 from app.models.patient import Patient
