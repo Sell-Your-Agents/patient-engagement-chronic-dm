@@ -6,6 +6,7 @@ use. The session strips every [[TOKEN]] from the audio and acts on the allowed o
   [[BOOK_APPOINTMENT doctor_id=..; start=..; name=..; reason=..]]  book a real slot
   [[ESCALATE:id]]                                                  raise an escalation now
   [[APPOINTMENT_REQUESTED]]                                        patient wants a visit (staff arrange)
+  [[SCHEDULE_CALLBACK when=..; reason=..]]                         caller asked to be called back
   [[SWITCH_LANGUAGE_XX]]                                           stripped and logged (not wired up yet)
   [[END_CALL]]                                                     handled by CallSession
 """
@@ -29,11 +30,13 @@ from app.services.audio_utils import decode_twilio_payload
 from app.services.call_context import (
     CAP_APPOINTMENT_REQUEST,
     CAP_BOOK,
+    CAP_CALLBACK,
     CAP_ESCALATE,
     CallContext,
     build_call_context,
 )
 from app.services.call_finalizer import finalize_call
+from app.services.callback_service import parse_callback_time, schedule_requested_callback
 from app.services.clinic_scheduling import BookingError, book_slot
 from app.services.stt_service import DeepgramStream
 from app.services.twilio_service import CallSession
@@ -120,6 +123,9 @@ class CallAgentSession(CallSession):
         if name == "APPOINTMENT_REQUESTED" and CAP_APPOINTMENT_REQUEST in caps:
             self.appointment_requested = True
             return ""
+        if name == "SCHEDULE_CALLBACK" and CAP_CALLBACK in caps:
+            await self._handle_callback(arg)
+            return ""
         if name.startswith("SWITCH_LANGUAGE"):
             logger.info(f"[{self.call_sid}] Language switch requested ({name}); not supported yet")
             return ""
@@ -143,6 +149,30 @@ class CallAgentSession(CallSession):
         self.db.add(db_case)
         await self.db.commit()
         logger.info(f"[{self.call_sid}] Escalation #{db_case.id} raised: {criterion}")
+
+    # ---------- Callback ----------
+
+    async def _handle_callback(self, raw: str) -> None:
+        """Schedule (or move) the callback the caller asked for."""
+        fields = {}
+        for part in raw.split(";"):
+            if "=" in part:
+                key, value = part.split("=", 1)
+                fields[key.strip()] = value.strip()
+        when = parse_callback_time(fields.get("when"))
+        callback = await schedule_requested_callback(
+            self.db,
+            self.call,
+            when,
+            reason=fields.get("reason") or None,
+            patient_name=self.context.patient_full_name,
+        )
+        await self.db.commit()
+        when = callback.scheduled_time
+        logger.info(f"[{self.call_sid}] Callback #{callback.id} scheduled for {when}")
+        self._pending_notes.append(
+            f"[[CALLBACK_SCHEDULED #{callback.id} for {when.strftime('%A %d %b %Y at %I:%M %p')}]]"
+        )
 
     # ---------- Booking ----------
 

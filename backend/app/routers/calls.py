@@ -1,12 +1,13 @@
 """Unified calls API: every call, inbound (Maya) and outbound (health check-in), from one table.
 
 GET / and GET /stats take ?direction=inbound|outbound; POST / dials an enrolled patient (outbound).
+/callbacks lists the callbacks callers asked for (and failed-call retries) so staff can act on them.
 """
 from datetime import datetime
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import twilio.rest
@@ -15,6 +16,19 @@ from app.config import get_settings
 from app.database import get_db
 from app.deps import get_current_user
 from app.models.call_log import CallLog, CallTurn, DIRECTION_OUTBOUND
+from app.models.callback_schedule import (
+    CallbackSchedule,
+    CALLBACK_CANCELLED,
+    CALLBACK_COMPLETED,
+    CALLBACK_PENDING,
+)
+from app.services.callback_service import (
+    CallbackBusyError,
+    claim_callback,
+    dial_callback,
+    schedule_staff_callback,
+)
+from app.services.clinic_scheduling import clinic_now
 from app.models.patient import Patient
 from app.models.plan import Plan
 from app.models.user import User
@@ -251,6 +265,149 @@ async def call_stats(
         "calls_with_warning_signs": warning_signs_calls,
         "average_csat": round(avg_csat, 2) if avg_csat else None,
     }
+
+
+class CallbackResponse(BaseModel):
+    id: int
+    patient_id: Optional[int]
+    plan_id: Optional[int]
+    patient_name: Optional[str]
+    phone_number: Optional[str]
+    scheduled_time: datetime  # local clinic time
+    schedule_type: str
+    status: str
+    attempt_number: int
+    max_attempts: int
+    notes: Optional[str]
+    source_call_log_id: Optional[int]
+    call_log_id: Optional[int]  # latest call the agent placed for it
+    created_at: datetime
+
+
+class CallbackUpdate(BaseModel):
+    status: Optional[str] = Field(None, pattern=f"^({CALLBACK_PENDING}|{CALLBACK_COMPLETED}|{CALLBACK_CANCELLED})$")
+    scheduled_time: Optional[datetime] = None
+
+
+class CallFollowUpRequest(BaseModel):
+    # Local clinic time; ignored when call_now is set
+    scheduled_time: Optional[datetime] = None
+    reason: Optional[str] = Field(None, max_length=500)
+    call_now: bool = False
+
+
+def _callback_response(callback: CallbackSchedule, patient: Optional[Patient]) -> CallbackResponse:
+    return CallbackResponse(
+        id=callback.id,
+        patient_id=callback.patient_id,
+        plan_id=callback.plan_id,
+        patient_name=callback.patient_name
+        or (f"{patient.first_name} {patient.last_name}" if patient else None),
+        phone_number=callback.phone_number or (patient.phone_number if patient else None),
+        scheduled_time=callback.scheduled_time,
+        schedule_type=callback.schedule_type,
+        status=callback.status,
+        attempt_number=callback.attempt_number,
+        max_attempts=callback.max_attempts,
+        notes=callback.notes,
+        source_call_log_id=callback.source_outreach_call_log_id,
+        call_log_id=callback.call_log_id,
+        created_at=callback.created_at,
+    )
+
+
+async def _get_callback(db: AsyncSession, callback_id: int) -> CallbackSchedule:
+    callback = await db.get(CallbackSchedule, callback_id)
+    if not callback:
+        raise HTTPException(status_code=404, detail="Callback not found")
+    return callback
+
+
+@router.get("/callbacks", response_model=List[CallbackResponse])
+async def list_callbacks(
+    status: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Scheduled callbacks, soonest first."""
+    query = (
+        select(CallbackSchedule, Patient)
+        .outerjoin(Patient, Patient.id == CallbackSchedule.patient_id)
+        .order_by(CallbackSchedule.scheduled_time)
+    )
+    if status:
+        query = query.where(CallbackSchedule.status == status)
+    result = await db.execute(query.limit(500))
+    return [_callback_response(callback, patient) for callback, patient in result.all()]
+
+
+@router.patch("/callbacks/{callback_id}", response_model=CallbackResponse)
+async def update_callback(
+    callback_id: int,
+    update: CallbackUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Mark a callback done / cancelled, or move it."""
+    callback = await _get_callback(db, callback_id)
+    if update.status:
+        callback.status = update.status
+    if update.scheduled_time:
+        callback.scheduled_time = update.scheduled_time.replace(tzinfo=None)
+    await db.commit()
+    patient = await db.get(Patient, callback.patient_id) if callback.patient_id else None
+    return _callback_response(callback, patient)
+
+
+@router.post("/callbacks/{callback_id}/dial", response_model=CallResponse)
+async def dial_callback_now(
+    callback_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Have the agent call this person back now instead of at the scheduled time."""
+    await _get_callback(db, callback_id)
+    if not await claim_callback(db, callback_id):
+        raise HTTPException(status_code=400, detail="This callback is no longer pending")
+    callback = await db.get(CallbackSchedule, callback_id)
+    return await dial_callback(db, callback)
+
+
+@router.post("/{call_log_id}/callback", response_model=CallbackResponse)
+async def follow_up_call(
+    call_log_id: int,
+    request: CallFollowUpRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Staff follow-up from the call log: have the agent call this person back at a set time, or now."""
+    call = await db.get(CallLog, call_log_id)
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+    if not call.phone_number and not call.patient_id:
+        raise HTTPException(status_code=400, detail="This call has no phone number to call back")
+
+    if request.call_now:
+        when = clinic_now()
+    elif request.scheduled_time:
+        when = request.scheduled_time.replace(tzinfo=None, second=0, microsecond=0)
+        if when <= clinic_now():
+            raise HTTPException(status_code=400, detail="Pick a time in the future")
+    else:
+        raise HTTPException(status_code=400, detail="Pick a callback time or choose Call now")
+
+    try:
+        callback = await schedule_staff_callback(db, call, when, (request.reason or "").strip() or None)
+    except CallbackBusyError as err:
+        raise HTTPException(status_code=409, detail=str(err))
+    await db.commit()
+
+    if request.call_now and await claim_callback(db, callback.id):
+        await dial_callback(db, callback)
+        await db.refresh(callback)
+
+    patient = await db.get(Patient, callback.patient_id) if callback.patient_id else None
+    return _callback_response(callback, patient)
 
 
 @router.get("/{call_log_id}", response_model=CallDetailResponse)

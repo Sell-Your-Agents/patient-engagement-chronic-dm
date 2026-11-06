@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -44,10 +45,21 @@ async def lifespan(app: FastAPI):
     async with AsyncSessionLocal() as db:
         await seed_clinic_doctors(db)
 
-    # Background scheduler task will be started here in Phase 3
-    # scheduler_task = asyncio.create_task(run_outreach_scheduler())
+    # Call people back when the callback they asked for falls due
+    from app.services.callback_service import run_callback_dialer
+
+    callback_dialer = asyncio.create_task(run_callback_dialer())
+
+    # Health check-in calls when a care plan's follow-up interval comes round
+    from app.services.checkin_dialer import run_checkin_dialer
+
+    checkin_dialer = asyncio.create_task(run_checkin_dialer()) if settings.checkin_dialer_enabled else None
 
     yield
+
+    callback_dialer.cancel()
+    if checkin_dialer:
+        checkin_dialer.cancel()
 
     # Shutdown
     logger.info("Application shutting down...")
@@ -109,7 +121,6 @@ from app.routers import (
     twilio_webhook,
     escalations,
     appointments,
-    medication_reminders,
     analytics,
     clinic,
     clinic_twilio,
@@ -123,7 +134,6 @@ app.include_router(calls.router)
 app.include_router(twilio_webhook.router)
 app.include_router(escalations.router)
 app.include_router(appointments.router)
-app.include_router(medication_reminders.router)
 app.include_router(analytics.router)
 app.include_router(clinic.router)
 app.include_router(clinic_twilio.router)

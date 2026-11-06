@@ -130,9 +130,10 @@ class SarvamTTSService:
 
             while True:
                 try:
-                    # Longer timeout for first chunk (model warm-up),
-                    # shorter for subsequent chunks
-                    current_timeout = 2.0 if is_first_chunk else 0.3
+                    # Longer timeout for first chunk (model warm-up), shorter for
+                    # subsequent chunks. The "final" event normally ends the loop; these
+                    # only matter if it never comes, and too short cuts sentences off.
+                    current_timeout = 5.0 if is_first_chunk else 1.5
                     msg = await asyncio.wait_for(
                         self.ws.recv(),
                         timeout=current_timeout

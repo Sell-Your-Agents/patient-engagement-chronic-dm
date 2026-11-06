@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import DateTime, Text, Boolean, ForeignKey, Integer, JSON
+from sqlalchemy import DateTime, String, Text, Boolean, ForeignKey, Integer, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -19,6 +19,10 @@ class DiseaseProtocol(Base):
     lab_reminder_defaults: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     escalation_instructions: Mapped[str] = mapped_column(Text)
     default_followup_interval_days: Mapped[int] = mapped_column(Integer)
+    # Set: follow-ups repeat every N minutes instead (days and call time are ignored)
+    default_followup_interval_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # "HH:MM" clinic local time follow-up calls are placed at; None keeps the time of the last call
+    default_call_time: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

@@ -1,7 +1,7 @@
 import anthropic
 import json
 import logging
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -9,6 +9,32 @@ settings = get_settings()
 client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
 logger.info(f"🤖 Claude API initialized with key: {settings.anthropic_api_key[:20]}...")
+
+
+# Words ending in "." that do not end a sentence ("Dr. Rao", "10 a.m. tomorrow")
+_ABBREVIATIONS = {"dr", "mr", "mrs", "ms", "st", "vs", "e.g", "i.e", "a.m", "p.m", "approx"}
+
+
+def _sentence_end(buffer: str) -> Optional[int]:
+    """Index of the first sentence-ending ".", "!" or "?" in buffer; None if there is none yet.
+
+    A "." only counts once the next character (a space) has arrived and the word before it is not
+    an abbreviation, so "Dr. Rao" and "120.5" are not cut in two.
+    """
+    for i, char in enumerate(buffer):
+        if char in "!?":
+            return i
+        if char != ".":
+            continue
+        if i + 1 >= len(buffer):
+            return None  # wait for the next text
+        if not buffer[i + 1].isspace():
+            continue
+        words = buffer[:i].split()
+        if words and words[-1].strip("(\"'").lower() in _ABBREVIATIONS:
+            continue
+        return i
+    return None
 
 
 async def stream_conversation(
@@ -47,12 +73,7 @@ async def stream_conversation(
 
                 # Yield complete sentences (ending with . ! or ?) for TTS
                 while True:
-                    match = None
-                    for i, char in enumerate(sentence_buffer):
-                        if char in ".!?":
-                            match = i
-                            break
-
+                    match = _sentence_end(sentence_buffer)
                     if match is not None:
                         sentence = sentence_buffer[: match + 1].strip()
                         sentence_buffer = sentence_buffer[match + 1 :].strip()
@@ -107,16 +128,20 @@ Return a JSON object with exactly these fields (use null when something does not
   "warning_sign_details": "description of red flags or null",
   "appointment_requested": true|false,
   "appointment_details": "details about appointment request or null",
+  "callback_requested": true|false,
+  "callback_time": "YYYY-MM-DDTHH:MM in clinic local time the caller asked to be called back, or null if no time was agreed",
+  "callback_reason": "short phrase why they want a callback, or null",
   "csat_score": 1-5 or null
 }}
 
 Be conservative: only set warning_signs_detected=true if the patient clearly reported concerning symptoms.
+Set callback_requested=true only if the caller asked the clinic to call them back later (e.g. "can you call me back", "call me tomorrow evening"); resolve relative times like "tomorrow at 5" against the current clinic date/time.
 """
 
     try:
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=700,
+            max_tokens=900,
             messages=[{"role": "user", "content": extraction_prompt}],
         )
 
@@ -147,5 +172,8 @@ Be conservative: only set warning_signs_detected=true if the patient clearly rep
             "warning_sign_details": None,
             "appointment_requested": False,
             "appointment_details": None,
+            "callback_requested": False,
+            "callback_time": None,
+            "callback_reason": None,
             "csat_score": None,
         }

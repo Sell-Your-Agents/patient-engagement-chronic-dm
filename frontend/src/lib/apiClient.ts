@@ -114,9 +114,42 @@ class ApiClient {
     return response.data
   }
 
+  async getConditionsOverview() {
+    const response = await this.client.get('/conditions/overview')
+    return response.data
+  }
+
+  async updateProtocol(
+    conditionId: number,
+    data: {
+      default_followup_interval_days?: number
+      default_followup_interval_minutes?: number | null
+      default_call_time?: string | null
+      apply_to_plans?: boolean
+    }
+  ) {
+    const response = await this.client.patch(`/conditions/${conditionId}/protocol`, data)
+    return response.data
+  }
+
   // Care Plans
   async listPlans() {
     const response = await this.client.get('/plans/')
+    return response.data
+  }
+
+  async updatePlan(
+    id: number,
+    data: {
+      followup_interval_days?: number
+      followup_interval_minutes?: number | null
+      next_due_date?: string
+      status?: string
+      assigned_physician_name?: string | null
+      notes?: string | null
+    }
+  ) {
+    const response = await this.client.patch(`/plans/${id}`, data)
     return response.data
   }
 
@@ -141,6 +174,28 @@ class ApiClient {
 
   async getCallStats(direction?: string) {
     const response = await this.client.get('/calls/stats', { params: { direction } })
+    return response.data
+  }
+
+  // Callbacks callers asked for (and failed-call retries)
+  async listCallbacks(status?: string) {
+    const response = await this.client.get('/calls/callbacks', { params: { status } })
+    return response.data
+  }
+
+  async updateCallback(id: number, data: { status?: string; scheduled_time?: string }) {
+    const response = await this.client.patch(`/calls/callbacks/${id}`, data)
+    return response.data
+  }
+
+  // Staff follow-up on a call: callback at a set time (local clinic time), or call now
+  async followUpCall(callId: number, data: { scheduled_time?: string; reason?: string; call_now?: boolean }) {
+    const response = await this.client.post(`/calls/${callId}/callback`, data)
+    return response.data
+  }
+
+  async dialCallback(id: number) {
+    const response = await this.client.post(`/calls/callbacks/${id}/dial`)
     return response.data
   }
 

@@ -86,6 +86,35 @@ def clinic_now() -> datetime:
     return datetime.now(tz).replace(tzinfo=None, second=0, microsecond=0)
 
 
+def at_clinic_time(due_utc: datetime, call_time: Optional[str]) -> datetime:
+    """Move a naive-UTC datetime to `call_time` ("HH:MM", clinic local) on the same clinic-local day."""
+    if not call_time:
+        return due_utc
+    offset = timedelta(minutes=settings.clinic_utc_offset_minutes)
+    local = datetime.combine((due_utc + offset).date(), _parse_hhmm(call_time))
+    return local - offset
+
+
+def followup_minutes(interval_minutes: Optional[int]) -> Optional[int]:
+    """Minutes between check-ins when they run on minutes (plan setting, else the test override)."""
+    if interval_minutes:
+        return interval_minutes
+    return settings.checkin_test_interval_minutes or None
+
+
+def next_followup_due(
+    start_utc: datetime, interval_days: int, call_time: Optional[str], interval_minutes: Optional[int] = None
+) -> datetime:
+    """Next check-in (naive UTC): interval_days after start_utc, at call_time if set.
+
+    A minutes interval (or CHECKIN_TEST_INTERVAL_MINUTES) replaces the days and ignores call_time.
+    """
+    minutes = followup_minutes(interval_minutes)
+    if minutes:
+        return start_utc + timedelta(minutes=minutes)
+    return at_clinic_time(start_utc + timedelta(days=interval_days), call_time)
+
+
 def _parse_hhmm(value: str) -> time:
     hours, minutes = value.split(":")
     return time(int(hours), int(minutes))

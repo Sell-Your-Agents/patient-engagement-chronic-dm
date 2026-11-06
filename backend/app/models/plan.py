@@ -15,6 +15,8 @@ class Plan(Base):
     )
     protocol_id: Mapped[int] = mapped_column(ForeignKey("disease_protocols.id"))
     followup_interval_days: Mapped[int] = mapped_column(Integer)
+    # Set: check-ins repeat every N minutes instead of every followup_interval_days
+    followup_interval_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     next_due_date: Mapped[datetime] = mapped_column(DateTime, index=True)
     last_outreach_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="active", index=True)

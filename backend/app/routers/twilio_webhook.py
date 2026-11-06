@@ -13,6 +13,7 @@ from app.database import get_db
 from app.config import get_settings
 from app.models.call_log import CallLog, DIRECTION_OUTBOUND
 from app.services.call_agent import run_call_stream
+from app.services.callback_service import find_callback_for_call, mark_callback_call_ended
 from app.services.public_url import public_request_url, public_ws_url
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,9 @@ async def twiml_response(request: Request, db: AsyncSession = Depends(get_db)):
     )
     call = result.unique().scalar_one_or_none()
 
-    if not call or not call.patient:
+    # Callbacks may be to someone who is not an enrolled patient
+    callback = await find_callback_for_call(db, call.id) if call else None
+    if not call or not (call.patient or callback):
         response = VoiceResponse()
         response.say("Sorry, we could not find your call information.")
         response.hangup()
@@ -60,12 +63,17 @@ async def twiml_response(request: Request, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     response = VoiceResponse()
-    logger.info(f"✅ Building TwiML for patient {call.patient.first_name}")
-    response.say(
-        f"Hello, is this {call.patient.first_name}? "
-        f"This is {settings.clinic_agent_name} from {settings.clinic_name}, calling to check in on how you're doing. "
-        "Let me connect you now."
-    )
+    if callback:
+        # The agent's own greeting explains the callback
+        logger.info(f"✅ Building TwiML for callback #{callback.id}")
+        response.say("Hello, please hold for a moment.")
+    else:
+        logger.info(f"✅ Building TwiML for patient {call.patient.first_name}")
+        response.say(
+            f"Hello, is this {call.patient.first_name}? "
+            f"This is {settings.clinic_agent_name} from {settings.clinic_name}, calling to check in on how you're doing. "
+            "Let me connect you now."
+        )
 
     ws_url = public_ws_url(f"/twilio/stream/{call_sid}")
     logger.info(f"📡 WebSocket URL: {ws_url}")
@@ -88,6 +96,7 @@ async def apply_call_status(db: AsyncSession, call_sid: str, call_status: str, d
     if call_status in ("failed", "busy", "no-answer", "canceled"):
         call.status = "no-answer" if call_status == "no-answer" else "failed"
         call.ended_at = datetime.utcnow()
+        await mark_callback_call_ended(db, call, answered=False)
     elif call_status == "completed":
         call.status = "completed"
         call.ended_at = call.ended_at or datetime.utcnow()

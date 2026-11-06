@@ -7,11 +7,18 @@ from sqlalchemy.orm import joinedload
 from app.models.appointment import Appointment, SOURCE_AGENT
 from app.models.call_log import CallLog, DIRECTION_OUTBOUND
 from app.models.plan import Plan
+from app.models.disease_protocol import DiseaseProtocol
 from app.models.condition import PatientCondition
 from app.models.escalation import Escalation
 from app.models.callback_schedule import CallbackSchedule
 from app.services.claude_service import finalize_call_summary
-from app.services.clinic_scheduling import find_doctor_by_name
+from app.services.callback_service import (
+    find_requested_callback,
+    mark_callback_call_ended,
+    parse_callback_time,
+    schedule_requested_callback,
+)
+from app.services.clinic_scheduling import clinic_now, find_doctor_by_name, next_followup_due
 
 
 async def finalize_call(
@@ -25,7 +32,8 @@ async def finalize_call(
 
     Records the summary on the call, raises an escalation for red flags or urgent callers,
     requests an appointment when the patient asked for one and none was booked during the call,
-    and (outbound only) schedules the next plan follow-up.
+    schedules a callback the caller asked for if the agent did not already, and (outbound only)
+    schedules the next plan follow-up.
 
     Returns:
         Summary dict with the action items taken
@@ -60,7 +68,8 @@ async def finalize_call(
     context_text = f"""Call direction: {call.direction} ({'the clinic phoned the patient for a check-in' if outbound else 'the caller phoned the clinic'})
 Patient on record: {patient_name or 'none (unknown caller)'}
 Chronic condition: {condition}
-Call duration: {call.duration_seconds} seconds"""
+Call duration: {call.duration_seconds} seconds
+Current clinic date/time: {clinic_now().strftime('%A %Y-%m-%d %H:%M')}"""
     summary = await finalize_call_summary(transcript, context_text) if transcript.strip() else {}
 
     appointments = list(
@@ -86,6 +95,7 @@ Call duration: {call.duration_seconds} seconds"""
         "escalations_created": [],
         "appointments_created": [],
         "reschedule_date": None,
+        "callback_id": None,
     }
 
     # Fill gaps on appointments booked during the call
@@ -147,23 +157,35 @@ Call duration: {call.duration_seconds} seconds"""
             }
         )
 
+    # Caller asked to be called back -> make sure a callback is on the list
+    callback = await find_requested_callback(db, call_log_id)
+    if not callback and summary.get("callback_requested"):
+        callback = await schedule_requested_callback(
+            db,
+            call,
+            parse_callback_time(summary.get("callback_time")),
+            reason=summary.get("callback_reason") or call.reason,
+            patient_name=call.patient_name,
+        )
+    if callback:
+        callback.patient_name = callback.patient_name or call.patient_name
+        actions["callback_id"] = callback.id
+
     # Reschedule care plan follow-up (only a check-in call counts as the outreach)
     if outbound and call.plan:
-        next_due = datetime.utcnow() + timedelta(days=call.plan.followup_interval_days)
+        protocol = await db.get(DiseaseProtocol, call.plan.protocol_id)
+        next_due = next_followup_due(
+            datetime.utcnow(),
+            call.plan.followup_interval_days,
+            protocol.default_call_time if protocol else None,
+            call.plan.followup_interval_minutes,
+        )
         call.plan.next_due_date = next_due
         call.plan.last_outreach_at = datetime.utcnow()
         actions["reschedule_date"] = next_due.isoformat()
 
-    # Mark this call's schedule entry as completed
-    if hasattr(call, "callback_schedule_id") and call.callback_schedule_id:
-        schedule_result = await db.execute(
-            select(CallbackSchedule).where(
-                CallbackSchedule.id == call.callback_schedule_id
-            )
-        )
-        schedule = schedule_result.scalar_one_or_none()
-        if schedule:
-            schedule.status = "completed"
+    # A callback call: done if the person spoke to the agent, otherwise retry later
+    await mark_callback_call_ended(db, call, answered="USER:" in (transcript or ""))
 
     await db.commit()
 
@@ -208,7 +230,7 @@ async def handle_failed_call(
             # Increment attempt and reschedule
             schedule.attempt_number += 1
             if schedule.attempt_number < schedule.max_attempts:
-                schedule.scheduled_time = datetime.utcnow() + timedelta(
+                schedule.scheduled_time = clinic_now() + timedelta(
                     minutes=retry_backoff_minutes * (2 ** (schedule.attempt_number - 1))
                 )
             else:
@@ -227,7 +249,7 @@ async def handle_failed_call(
             schedule = CallbackSchedule(
                 patient_id=call.patient_id,
                 plan_id=call.plan_id,
-                scheduled_time=datetime.utcnow() + timedelta(minutes=retry_backoff_minutes),
+                scheduled_time=clinic_now() + timedelta(minutes=retry_backoff_minutes),
                 schedule_type="retry",
                 attempt_number=1,
                 max_attempts=3,

@@ -4,6 +4,7 @@ import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { PatientListPage } from './pages/PatientListPage'
 import { PatientDetailPage } from './pages/PatientDetailPage'
+import { DiseasesPage } from './pages/DiseasesPage'
 import { EscalationQueuePage } from './pages/EscalationQueuePage'
 import { EscalationDetailPage } from './pages/EscalationDetailPage'
 import { AppointmentsPage } from './pages/AppointmentsPage'
@@ -46,6 +47,13 @@ const patientDetailRoute = new Route({
   component: PatientDetailPage,
 })
 
+// Chronic conditions + care plan schedules
+const diseasesRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/diseases',
+  component: DiseasesPage,
+})
+
 // Escalations
 const escalationListRoute = new Route({
   getParentRoute: () => rootRoute,
@@ -86,6 +94,7 @@ const routeTree = rootRoute.addChildren([
   dashboardRoute,
   patientListRoute,
   patientDetailRoute,
+  diseasesRoute,
   escalationListRoute,
   escalationDetailRoute,
   appointmentListRoute,
