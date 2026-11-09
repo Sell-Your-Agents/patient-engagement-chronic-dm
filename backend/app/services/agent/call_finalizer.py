@@ -132,8 +132,9 @@ Current clinic date/time: {clinic_now().strftime('%A %Y-%m-%d %H:%M')}"""
         )
 
     # Patient wants a visit but no slot was booked in the call -> staff-confirmed request
-    if summary.get("appointment_requested") and not appointments and call.plan:
-        physician_name = call.plan.assigned_physician_name
+    if summary.get("appointment_requested") and not appointments and (call.plan or call.patient_id):
+        # Patients without a care plan get a request with no physician; staff pick the doctor
+        physician_name = call.plan.assigned_physician_name if call.plan else None
         # Link to the shared doctor table when the care plan's physician is one of our doctors
         doctor = await find_doctor_by_name(db, physician_name)
         appointment = Appointment(

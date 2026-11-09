@@ -10,6 +10,7 @@ import { EscalationDetailPage } from './pages/EscalationDetailPage'
 import { AppointmentsPage } from './pages/AppointmentsPage'
 import { CallsPage } from './pages/CallsPage'
 import { DoctorsPage } from './pages/DoctorsPage'
+import { CallAgentPage } from './pages/CallAgentPage'
 import { ROUTER_BASEPATH } from './lib/paths'
 
 // Root route
@@ -88,6 +89,13 @@ const doctorsRoute = new Route({
   component: DoctorsPage,
 })
 
+// Call the agent from the browser (Twilio Voice SDK, same path as a call to the clinic number)
+const callAgentRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/call-agent',
+  component: CallAgentPage,
+})
+
 // Create route tree
 const routeTree = rootRoute.addChildren([
   loginRoute,
@@ -100,6 +108,7 @@ const routeTree = rootRoute.addChildren([
   appointmentListRoute,
   callListRoute,
   doctorsRoute,
+  callAgentRoute,
 ])
 
 // Create router

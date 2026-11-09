@@ -62,18 +62,9 @@ async def twiml_response(request: Request, db: AsyncSession = Depends(get_db)):
     call.started_at = datetime.utcnow()
     await db.commit()
 
+    # No <Say> here: Maya's own opening line (one voice) asks who is speaking before anything else
     response = VoiceResponse()
-    if callback:
-        # The agent's own greeting explains the callback
-        logger.info(f"✅ Building TwiML for callback #{callback.id}")
-        response.say("Hello, please hold for a moment.")
-    else:
-        logger.info(f"✅ Building TwiML for patient {call.patient.first_name}")
-        response.say(
-            f"Hello, is this {call.patient.first_name}? "
-            f"This is {settings.clinic_agent_name} from {settings.clinic_name}, calling to check in on how you're doing. "
-            "Let me connect you now."
-        )
+    logger.info(f"✅ Building TwiML for {'callback #' + str(callback.id) if callback else 'check-in call #' + str(call.id)}")
 
     ws_url = public_ws_url(f"/twilio/stream/{call_sid}")
     logger.info(f"📡 WebSocket URL: {ws_url}")

@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-import twilio.rest
 
 from app.config import get_settings
 from app.database import get_db
@@ -26,6 +25,7 @@ from app.services.scheduling.callback_service import (
     CallbackBusyError,
     claim_callback,
     dial_callback,
+    place_agent_call,
     schedule_staff_callback,
 )
 from app.services.scheduling.clinic_scheduling import clinic_now
@@ -35,7 +35,6 @@ from app.models.user import User
 
 settings = get_settings()
 router = APIRouter(prefix="/api/calls", tags=["calls"])
-twilio_client = twilio.rest.Client(settings.twilio_account_sid, settings.twilio_auth_token)
 
 DIRECTION_PATTERN = "^(inbound|outbound)$"
 
@@ -165,18 +164,9 @@ async def initiate_outbound_call(
             await db.commit()
             return CallResponse.model_validate(call_log)
 
-        # Initiate Twilio call
-        call = twilio_client.calls.create(
-            from_=settings.twilio_phone_number,
-            to=patient.phone_number,
-            url=f"{settings.api_base_url}/twilio/twiml",
-            method="POST",
-            record=True,
-            timeout=30,
-        )
-
-        call_log.call_sid = call.sid
-        call_log.status = "in_progress"
+        # Same dialling as scheduled calls: status callback (no-answer detection) and the recording setting
+        call_log.call_sid = await place_agent_call(patient.phone_number)
+        call_log.status = "initiated"  # becomes "in-progress" when the patient answers (/twilio/twiml)
         await db.commit()
 
         return CallResponse.model_validate(call_log)

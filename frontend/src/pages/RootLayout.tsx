@@ -13,6 +13,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/diseases", label: "Chronic Condition", icon: "heart" },
   { to: "/doctors", label: "Doctors", icon: "stethoscope" },
   { to: "/calls", label: "Call Logs", icon: "phone" },
+  { to: "/call-agent", label: "Call the Agent", icon: "phoneCall" },
   { to: "/appointments", label: "Appointments", icon: "calendar" },
   { to: "/escalations", label: "Escalations", icon: "alert" },
 ];

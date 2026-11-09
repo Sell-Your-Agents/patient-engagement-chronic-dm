@@ -124,6 +124,8 @@ from app.routers import (
     analytics,
     clinic,
     clinic_twilio,
+    browser_call,
+    sim_call,
 )
 
 app.include_router(auth.router)
@@ -137,6 +139,8 @@ app.include_router(appointments.router)
 app.include_router(analytics.router)
 app.include_router(clinic.router)
 app.include_router(clinic_twilio.router)
+app.include_router(browser_call.router)
+app.include_router(sim_call.router)
 
 
 @app.get("/", include_in_schema=False)

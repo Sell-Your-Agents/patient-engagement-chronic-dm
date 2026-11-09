@@ -5,6 +5,23 @@ export interface ApiError {
   detail: string
 }
 
+/** Whether browser calling is set up, and the URLs to enter in the Twilio console. */
+export interface BrowserCallStatus {
+  /** Direct test call (no Twilio) needs only the AI, speech and voice keys */
+  direct_ready: boolean
+  direct_missing: string[]
+  /** CLINIC_INBOUND_NUMBER, once the clinic has a real number ("" until then) */
+  inbound_number: string
+  /** Twilio Voice SDK browser calling is set up */
+  configured: boolean
+  missing: string[]
+  voice_url: string
+  status_url: string
+  recording_default: boolean
+  agent_name: string
+  clinic_name: string
+}
+
 class ApiClient {
   private client: AxiosInstance
   private token: string | null = null
@@ -196,6 +213,17 @@ class ApiClient {
 
   async dialCallback(id: number) {
     const response = await this.client.post(`/calls/callbacks/${id}/dial`)
+    return response.data
+  }
+
+  // Browser calling ("Call the Agent" page, Twilio Voice SDK)
+  async browserCallStatus(): Promise<BrowserCallStatus> {
+    const response = await this.client.get('/browser-call/status')
+    return response.data
+  }
+
+  async browserCallToken(): Promise<{ token: string; identity: string }> {
+    const response = await this.client.post('/browser-call/token')
     return response.data
   }
 

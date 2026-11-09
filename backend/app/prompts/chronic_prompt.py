@@ -1,68 +1,54 @@
+from app.config import get_settings
+from app.models.disease_protocol import DiseaseProtocol
 from app.models.patient import Patient
 from app.models.plan import Plan
-from app.models.disease_protocol import DiseaseProtocol
-from app.prompts.prompts import CHRONIC_SYSTEM_PROMPT
+from app.prompts.outbound_prompts import APPOINTMENT_RULE_REQUEST, CHRONIC_SYSTEM_PROMPT
+from app.services.agent.context_shared import full_name, now_text, physician_spoken, red_flag_lines
+
+settings = get_settings()
 
 
-def build_system_prompt(
-    patient: Patient,
-    plan: Plan,
-    protocol: DiseaseProtocol,
-    agent_name: str = "HealthCoach",
-    org_name: str = "Patient Engagement Center",
-) -> str:
-    """Fill the chronic-care check-in prompt (Part A in prompts.py) for the health coaching conversation.
+def build_system_prompt(patient: Patient, plan: Plan, protocol: DiseaseProtocol) -> str:
+    """Fill the chronic-care check-in prompt (outbound_prompts.CHRONIC_SYSTEM_PROMPT).
 
-    The prompt is data-driven: assessment questions, red-flag criteria, education points,
-    and medication classes are pulled from the DiseaseProtocol JSON, not hardcoded.
+    The prompt is data-driven: assessment questions, red flags (always with their ids) and
+    education points come from the DiseaseProtocol row, not hardcoded. The protocol's
+    escalation_instructions are staff text and are never put in front of the patient.
     """
+    name = full_name(patient)
 
-    # Extract protocol data
-    assessment_questions = protocol.assessment_questions or []
-    red_flag_criteria = protocol.red_flag_criteria or []
-    education_points = protocol.education_talking_points or []
-    medication_classes = protocol.medication_classes or []
-    escalation_instructions = protocol.escalation_instructions or ""
-
-    # Format assessment questions for the prompt
     assessment_text = "\n".join(
-        f"  - {q['text']}" for q in assessment_questions if "text" in q
-    )
+        f"  - {q['text']}" for q in (protocol.assessment_questions or []) if isinstance(q, dict) and q.get("text")
+    ) or "  - How have you been feeling since the last check-in?"
+    education_text = "\n".join(
+        f"  - {point}" for point in (protocol.education_talking_points or []) if point
+    ) or "  - (no health tips listed; skip this step)"
 
-    # Format red flag criteria
-    red_flag_text = "\n".join(
-        f"  - {c['description']} (severity: {c.get('severity', 'unknown')})"
-        for c in red_flag_criteria
-        if "description" in c
-    )
-
-    # Format education talking points
-    education_text = "\n".join(f"  - {point}" for point in education_points)
-
-    # Format medication classes
-    medication_text = ", ".join(medication_classes) if medication_classes else "N/A"
-
-    # Get condition name
-    condition_name = "Unknown"
-    if plan and plan.patient_condition:
+    condition_name = "your condition"
+    if plan.patient_condition and plan.patient_condition.chronic_condition:
         condition_name = plan.patient_condition.chronic_condition.display_name
 
-    last_outreach = plan.last_outreach_at.strftime('%B %d, %Y') if plan.last_outreach_at else 'First contact'
+    if plan.followup_interval_minutes:
+        followup_interval = f"every {plan.followup_interval_minutes} minutes"
+    else:
+        followup_interval = f"every {plan.followup_interval_days} days"
+    last_outreach = (
+        plan.last_outreach_at.strftime("%d %B %Y") if plan.last_outreach_at else "this is the first check-in call"
+    )
 
     return CHRONIC_SYSTEM_PROMPT.format(
-        agent_name=agent_name,
-        org_name=org_name,
+        agent_name=settings.clinic_agent_name,
+        org_name=settings.clinic_name,
+        now=now_text(),
+        full_name=name,
         first_name=patient.first_name,
-        last_name=patient.last_name,
-        preferred_language=patient.preferred_language,
-        phone_number=patient.phone_number,
         condition_name=condition_name,
-        physician=plan.assigned_physician_name,
+        physician=plan.assigned_physician_name or "not assigned",
+        physician_spoken=physician_spoken(plan.assigned_physician_name),
         last_outreach=last_outreach,
-        followup_interval_days=plan.followup_interval_days,
+        followup_interval=followup_interval,
         assessment_text=assessment_text,
-        medication_text=medication_text,
+        red_flag_text=red_flag_lines(protocol),
         education_text=education_text,
-        red_flag_text=red_flag_text,
-        escalation_instructions=escalation_instructions,
+        appointment_rule=APPOINTMENT_RULE_REQUEST,
     )

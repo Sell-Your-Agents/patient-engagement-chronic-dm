@@ -8,7 +8,7 @@ Call Logs page.
 """
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Optional
 
 import twilio.rest
@@ -53,6 +53,16 @@ def parse_callback_time(value: Optional[str]) -> Optional[datetime]:
         return None
     when = when.replace(tzinfo=None, second=0, microsecond=0)
     return when if when > clinic_now() else None
+
+
+def _hhmm(value: str) -> time:
+    hours, minutes = value.split(":")
+    return time(int(hours), int(minutes))
+
+
+def within_calling_hours(when: datetime) -> bool:
+    """True if a clinic-local time is inside the hours the agent may call people."""
+    return _hhmm(settings.checkin_call_start) <= when.time() <= _hhmm(settings.checkin_call_end)
 
 
 async def find_requested_callback(db: AsyncSession, call_log_id: int) -> Optional[CallbackSchedule]:
@@ -198,10 +208,23 @@ async def place_agent_call(to: str) -> str:
         # Needed to notice a call nobody answered
         status_callback=f"{base}/twilio/status",
         status_callback_method="POST",
-        record=True,
+        record=settings.call_recording_enabled,
         timeout=30,
     )
     return twilio_call.sid
+
+
+async def start_call_recording(call_sid: Optional[str]) -> None:
+    """Start recording a call that is already connected (inbound calls can only be recorded this way)."""
+    # Only real Twilio calls (CallSid "CA...") can be recorded; direct browser tests ("SIM...") cannot.
+    # Only the account credentials are needed (browser calls work without a Twilio phone number).
+    if not call_sid or not call_sid.startswith("CA") or not (settings.twilio_account_sid and settings.twilio_auth_token):
+        return
+    try:
+        await asyncio.to_thread(twilio_client.calls(call_sid).recordings.create)
+        logger.info(f"[{call_sid}] Recording started")
+    except Exception as exc:
+        logger.warning(f"[{call_sid}] Could not start recording: {exc}")
 
 
 async def claim_callback(db: AsyncSession, callback_id: int) -> bool:

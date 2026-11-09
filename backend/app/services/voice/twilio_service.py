@@ -1,20 +1,43 @@
+"""One live voice call: caller audio in (Deepgram STT), agent replies out (Claude -> Sarvam TTS).
+
+Audio is sent to the caller directly as it is synthesised, with no queue and no sleep-based pacing:
+Twilio (or the direct browser test) buffers and plays it in real time. Pacing with
+asyncio.sleep(0.02) per 20 ms frame under-ran on Windows (timer steps of ~15.6 ms make each
+sleep ~31 ms), which caused choppy, crackling audio.
+
+Barge-in: when the caller starts talking over the agent, the reply is cancelled and Twilio is told
+to "clear" the audio it has buffered but not yet played. Whatever the agent had already said is
+kept in the conversation history (marked as cut off), so it doesn't start the same reply over.
+"""
 import asyncio
+import logging
 from datetime import datetime
-from typing import Optional
+from typing import Callable, List, Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.call_log import CallLog, CallTurn
-from app.services.voice.stt_service import DeepgramStream
-from app.services.voice.sarvam_tts_service import SarvamTTSService
 from app.services.agent.claude_service import stream_conversation
 from app.services.voice.audio_utils import encode_mulaw_for_twilio
-import logging
+from app.services.voice.sarvam_tts_service import SarvamTTSService
+from app.services.voice.stt_service import DeepgramStream
 
 logger = logging.getLogger(__name__)
 
+FRAME_BYTES = 160  # 20 ms of 8 kHz mu-law
+MULAW_SILENCE = b"\xff"
+SAMPLE_RATE = 8000
+# A caller interim transcript this long interrupts the agent (shorter ones are often "mm" / noise)
+BARGE_IN_MIN_WORDS = 2
+# Max tokens per reply: replies are one or two short sentences (see common_prompts SPEAKING STYLE)
+REPLY_MAX_TOKENS = 220
+# Marks a reply the caller talked over, in the history the model sees
+CUT_OFF_MARK = " …(cut off: the caller started speaking)"
+FALLBACK_REPLY = "Sorry, could you say that again?"
+
 
 class CallSession:
-    """Manages a single voice call session - matches reference app architecture."""
+    """Manages a single voice call session."""
 
     def __init__(self, websocket, call_sid: str):
         self.ws = websocket
@@ -24,226 +47,239 @@ class CallSession:
         self.sarvam_tts = SarvamTTSService()
 
         self.selected_digit = "3"  # English
-        self.is_agent_speaking = False
-        self._speak_interrupted = False
         self.started_at = datetime.utcnow()
-
-        self._llm_task: Optional[asyncio.Task] = None
-        self._frame_queue: Optional[asyncio.Queue] = None
         self.is_call_active = True
         self.current_turn_id = 0
 
-        # For conversation history
-        self.conversation_history = []
+        self._llm_task: Optional[asyncio.Task] = None
+        self._send_lock = asyncio.Lock()
+        # Loop time at which the audio already sent to the caller finishes playing
+        self._play_until = 0.0
+        # The last user turn, while no reply to it has been spoken yet (an early "eager" turn may be replaced)
+        self._user_unanswered = False
+        self._unanswered_user_row: Optional[CallTurn] = None
+
+        # Conversation
+        self.conversation_history: List[dict] = []
         self.transcript_text = ""
         self.system_prompt = ""
         self.call: Optional[CallLog] = None
         self.db: Optional[AsyncSession] = None
 
-    async def send_audio_to_caller(self, mulaw_bytes: bytes) -> None:
-        """Send audio frame to Twilio."""
-        if not self.stream_sid or not self.is_call_active:
-            return
-        try:
-            await self.ws.send_json({
-                "event": "media",
-                "streamSid": self.stream_sid,
-                "media": {
-                    "payload": encode_mulaw_for_twilio(mulaw_bytes)
-                },
-            })
-        except Exception:
-            pass
-
-    async def cancel_active_turn(self) -> None:
-        """Cancel active LLM task for barge-in."""
-        if self._llm_task and not self._llm_task.done():
-            self._llm_task.cancel()
-            try:
-                await asyncio.wait_for(self._llm_task, timeout=0.3)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
-
-    async def speak(self, text: str) -> None:
-        """Synthesize and send greeting/response to caller."""
-        self.is_agent_speaking = True
-        self._speak_interrupted = False
-
-        audio_buffer = bytearray()
-        try:
-            async for chunk in self.sarvam_tts.stream_tts(text, self.selected_digit, self.call_sid):
-                if self._speak_interrupted or not self.is_call_active:
-                    break
-
-                audio_buffer.extend(chunk)
-
-                while len(audio_buffer) >= 160:
-                    if self._speak_interrupted or not self.is_call_active:
-                        break
-
-                    frame = audio_buffer[:160]
-                    del audio_buffer[:160]
-
-                    await self.send_audio_to_caller(bytes(frame))
-                    await asyncio.sleep(0.02)
-
-        except Exception as exc:
-            logger.error(f"[{self.call_sid}] TTS error: {exc}")
-
-        finally:
-            self.is_agent_speaking = False
-            self._speak_interrupted = False
+    # ---------- Hooks for subclasses (CallAgentSession) ----------
 
     async def process_agent_sentence(self, sentence: str) -> str:
-        """Hook for subclasses to handle custom control tokens. Returns the sentence to use."""
+        """Act on control tokens in a sentence. Returns the text to speak."""
         return sentence
 
-    async def add_turn(self, role: str, content: str) -> None:
-        """Add turn to conversation history."""
+    async def flush_agent_text(self) -> str:
+        """Text held back at the end of a reply (e.g. an unfinished token). Returns what can be spoken."""
+        return ""
+
+    def on_new_turn(self) -> None:
+        """Called when the caller starts a new turn (reset per-reply state)."""
+
+    # ---------- Audio out ----------
+
+    def _now(self) -> float:
+        return asyncio.get_running_loop().time()
+
+    @property
+    def agent_audible(self) -> bool:
+        """True while audio already sent to the caller is still playing."""
+        return self._play_until > self._now()
+
+    def _reply_running(self) -> bool:
+        return bool(self._llm_task and not self._llm_task.done())
+
+    async def send_audio_to_caller(self, mulaw_bytes: bytes) -> None:
+        """Send audio straight to the caller (Twilio buffers and plays it in real time)."""
+        if not self.stream_sid or not self.is_call_active or not mulaw_bytes:
+            return
+        async with self._send_lock:
+            try:
+                await self.ws.send_json({
+                    "event": "media",
+                    "streamSid": self.stream_sid,
+                    "media": {"payload": encode_mulaw_for_twilio(mulaw_bytes)},
+                })
+            except Exception:
+                return
+        now = self._now()
+        self._play_until = max(self._play_until, now) + len(mulaw_bytes) / SAMPLE_RATE
+
+    async def clear_caller_audio(self) -> None:
+        """Barge-in: drop the agent audio the caller hasn't heard yet."""
+        self._play_until = 0.0
+        if not self.stream_sid:
+            return
+        async with self._send_lock:
+            try:
+                await self.ws.send_json({"event": "clear", "streamSid": self.stream_sid})
+            except Exception:
+                pass
+
+    async def _say(self, text: str, is_current: Callable[[], bool]) -> bool:
+        """Synthesise one sentence and send its audio as it arrives. False if interrupted."""
+        pending = bytearray()
+        stream = self.sarvam_tts.stream_tts(text, self.selected_digit, self.call_sid)
+        try:
+            async for chunk in stream:
+                if not is_current():
+                    return False
+                pending.extend(chunk)
+                whole = len(pending) - len(pending) % FRAME_BYTES
+                if whole:
+                    await self.send_audio_to_caller(bytes(pending[:whole]))
+                    del pending[:whole]
+        except Exception as exc:
+            logger.error(f"[{self.call_sid}] TTS error: {exc}")
+            return is_current()
+        finally:
+            await stream.aclose()
+        if pending and is_current():
+            # Pad the last partial frame with silence instead of dropping it (a dropped tail clicks)
+            pending.extend(MULAW_SILENCE * (FRAME_BYTES - len(pending)))
+            await self.send_audio_to_caller(bytes(pending))
+        return is_current()
+
+    async def speak(self, text: str) -> None:
+        """Say a fixed line (the greeting). The caller can talk over it."""
+        turn = self.current_turn_id
+        await self._say(text, lambda: self.is_call_active and self.current_turn_id == turn)
+
+    # ---------- Conversation ----------
+
+    async def add_turn(self, role: str, content: str, persist: bool = True) -> None:
+        """Add a turn to the history and transcript; persist=True also saves it as a CallTurn row."""
         self.conversation_history.append({"role": role, "content": content})
         self.transcript_text += f"{role.upper()}: {content}\n"
-
-        # Persist to DB
-        if self.db and self.call:
-            turn = CallTurn(
-                call_log_id=self.call.id,
-                role=role,
-                content=content,
-                timestamp=datetime.utcnow(),
-            )
-            self.db.add(turn)
+        row: Optional[CallTurn] = None
+        if persist and self.db and self.call:
+            row = CallTurn(call_log_id=self.call.id, role=role, content=content, timestamp=datetime.utcnow())
+            self.db.add(row)
             await self.db.flush()
+        self._user_unanswered = role == "user"
+        self._unanswered_user_row = row if role == "user" else None
+
+    def _replace_unanswered_user_turn(self, text: str) -> bool:
+        """An early ("eager") turn was replaced by the full one before any reply: update it in place."""
+        if not self._user_unanswered or not self.conversation_history or self.conversation_history[-1]["role"] != "user":
+            return False
+        old = self.conversation_history[-1]["content"]
+
+        def words(value: str) -> List[str]:
+            return "".join(c.lower() if c.isalnum() else " " for c in value).split()
+
+        # Only when the new text continues the old one (eager "Can I take" -> final "Can I take two?")
+        if words(text)[: len(words(old))] != words(old):
+            return False
+        self.conversation_history[-1]["content"] = text
+        old_line = f"USER: {old}\n"
+        if self.transcript_text.endswith(old_line):
+            self.transcript_text = self.transcript_text[: -len(old_line)] + f"USER: {text}\n"
+        if self._unanswered_user_row is not None:
+            self._unanswered_user_row.content = text
+        return True
+
+    async def interrupt(self) -> None:
+        """Stop the agent: cancel the reply in progress and drop its unplayed audio."""
+        task = self._llm_task
+        if task and not task.done():
+            task.cancel()
+            await asyncio.wait({task}, timeout=1.0)
+        if self._play_until > 0:
+            await self.clear_caller_audio()
 
     async def handle_transcript(self, text: str, is_final: bool) -> None:
-        """Handle final transcript from STT. Spawn producer-consumer for response."""
-        if not self.is_call_active or not is_final or not text:
+        """Caller speech from STT. Interim text can interrupt the agent; final text starts a reply."""
+        if not self.is_call_active or not text:
+            return
+
+        if not is_final:
+            # The caller is talking over the agent: stop its voice now (barge-in)
+            if len(text.split()) >= BARGE_IN_MIN_WORDS and (self.agent_audible or self._reply_running()):
+                logger.info(f"[{self.call_sid}] Barge-in: caller started speaking")
+                await self.interrupt()
             return
 
         self.current_turn_id += 1
-        active_turn = self.current_turn_id
-
+        turn = self.current_turn_id
         logger.info(f"[{self.call_sid}] Patient said: {text}")
-        self._speak_interrupted = True
 
-        await self.cancel_active_turn()
-        await asyncio.sleep(0.1)
+        await self.interrupt()
+        if turn != self.current_turn_id:
+            return  # a newer turn arrived while this one was stopping the old reply
+        self.on_new_turn()
+        if not self._replace_unanswered_user_turn(text):
+            await self.add_turn("user", text)
+        self._llm_task = asyncio.create_task(self._reply(turn))
 
-        self.is_agent_speaking = True
-        self._speak_interrupted = False
+    async def _reply(self, turn: int) -> None:
+        """Stream Claude's reply sentence by sentence; each sentence is spoken as soon as it is ready."""
+        def is_current() -> bool:
+            return self.is_call_active and self.current_turn_id == turn
 
-        # Add patient turn
-        await self.add_turn("user", text)
-
-        # Producer: Stream Claude response + TTS
-        async def fetch_claude_and_tts():
-            logger.info(f"[{self.call_sid}] Producer started")
-            full_response = ""
-            try:
-                async for sentence in stream_conversation(
-                    system_prompt=self.system_prompt,
-                    conversation_history=self.conversation_history,
-                    max_tokens=300,
-                ):
-                    if self.current_turn_id != active_turn:
-                        logger.info(f"[{self.call_sid}] Discarding stale turn {active_turn}")
-                        break
-                    if not self.is_call_active or self._speak_interrupted:
-                        break
-
-                    # Let subclasses act on custom control tokens (e.g. bookings)
-                    sentence = await self.process_agent_sentence(sentence)
-
-                    # Accumulate full response
-                    full_response += sentence + " "
-
-                    # Parse control tokens
-                    end_call = "[[END_CALL]]" in sentence
-                    clean_sentence = sentence.replace("[[END_CALL]]", "").strip()
-
-                    if clean_sentence:
-                        logger.info(f"[{self.call_sid}] Agent: {clean_sentence}")
-
-                        try:
-                            local_buffer = bytearray()
-                            async for chunk in self.sarvam_tts.stream_tts(
-                                clean_sentence, self.selected_digit, self.call_sid
-                            ):
-                                if self.current_turn_id != active_turn:
-                                    break
-                                if self._speak_interrupted or not self.is_call_active:
-                                    break
-
-                                local_buffer.extend(chunk)
-                                while len(local_buffer) >= 160:
-                                    if self.current_turn_id != active_turn:
-                                        break
-                                    if self._speak_interrupted or not self.is_call_active:
-                                        break
-                                    frame = bytes(local_buffer[:160])
-                                    del local_buffer[:160]
-                                    await self._frame_queue.put(frame)
-
-                            if len(local_buffer) > 0:
-                                local_buffer.clear()
-
-                        except Exception as tts_err:
-                            logger.error(f"[{self.call_sid}] TTS error: {tts_err}")
-                            self.sarvam_tts.ws = None
-
-                    if end_call:
-                        await self._frame_queue.put("END_CALL")
-
-                # Add complete response to conversation history
-                if full_response.strip():
-                    await self.add_turn("assistant", full_response.strip())
-
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.error(f"[{self.call_sid}] Producer error: {exc}", exc_info=True)
-            finally:
-                if not asyncio.current_task().cancelled():
-                    await self._frame_queue.put(None)
-                logger.info(f"[{self.call_sid}] Producer finished")
-
-        self._frame_queue = asyncio.Queue()
-        self._llm_task = asyncio.create_task(fetch_claude_and_tts())
-
-        # Consumer: Stream frames to Twilio
-        logger.info(f"[{self.call_sid}] Consumer started")
+        spoken: List[str] = []
+        end_call = False
+        completed = False
         try:
-            while True:
-                if self.current_turn_id != active_turn:
+            async for sentence in stream_conversation(
+                system_prompt=self.system_prompt,
+                conversation_history=list(self.conversation_history),
+                max_tokens=REPLY_MAX_TOKENS,
+            ):
+                if not is_current():
                     break
-                if not self.is_call_active or self._speak_interrupted:
-                    break
-
-                frame_item = await self._frame_queue.get()
-                try:
-                    if frame_item is None:
-                        logger.info(f"[{self.call_sid}] Queue EOF")
+                text = await self.process_agent_sentence(sentence)
+                if "[[END_CALL]]" in text:
+                    end_call = True
+                    text = text.replace("[[END_CALL]]", "").strip()
+                if text:
+                    logger.info(f"[{self.call_sid}] Agent: {text}")
+                    spoken.append(text)
+                    if not await self._say(text, is_current):
                         break
-                    if frame_item == "END_CALL":
-                        logger.info(f"[{self.call_sid}] END_CALL received")
-                        self.is_call_active = False
-                        break
+            else:
+                completed = True
 
-                    await self.send_audio_to_caller(frame_item)
-                    await asyncio.sleep(0.02)
-
-                finally:
-                    self._frame_queue.task_done()
-
+            if completed and is_current():
+                tail = await self.flush_agent_text()
+                if tail:
+                    logger.info(f"[{self.call_sid}] Agent: {tail}")
+                    spoken.append(tail)
+                    await self._say(tail, is_current)
+                if not spoken and not end_call:
+                    # The reply had nothing to say aloud (e.g. only a hidden token): never leave dead air
+                    logger.warning(f"[{self.call_sid}] Reply had no spoken text; asking the caller to repeat")
+                    spoken.append(FALLBACK_REPLY)
+                    await self._say(FALLBACK_REPLY, is_current)
+        except asyncio.CancelledError:
+            # Interrupted: keep what was already said so the agent doesn't repeat it next time
+            if spoken:
+                await self.add_turn("assistant", " ".join(spoken) + CUT_OFF_MARK, persist=False)
+            raise
         except Exception as exc:
-            logger.error(f"[{self.call_sid}] Consumer error: {exc}")
-        finally:
-            logger.info(f"[{self.call_sid}] Consumer finished")
+            logger.error(f"[{self.call_sid}] Reply error: {exc}", exc_info=True)
+
+        if spoken or end_call:
+            reply = " ".join(spoken) if completed and is_current() else " ".join(spoken) + CUT_OFF_MARK
+            await self.add_turn("assistant", reply)
+
+        if end_call and is_current():
+            # Hang up only after the goodbye has finished playing
+            remaining = self._play_until - self._now()
+            await asyncio.sleep(max(0.0, remaining) + 0.5)
+            if is_current():
+                logger.info(f"[{self.call_sid}] Ending call after goodbye")
+                self.is_call_active = False
 
     async def close(self) -> None:
-        """Clean up session."""
+        """Clean up the session."""
         self.is_call_active = False
         if self._llm_task and not self._llm_task.done():
             self._llm_task.cancel()
+            await asyncio.wait({self._llm_task}, timeout=1.0)
         if self.deepgram_stt:
             await self.deepgram_stt.stop()
         if self.sarvam_tts:

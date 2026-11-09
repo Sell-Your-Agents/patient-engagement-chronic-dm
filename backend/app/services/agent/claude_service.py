@@ -1,15 +1,18 @@
 import anthropic
 import json
 import logging
-from typing import List, Optional, Tuple
+from typing import AsyncGenerator, List, Optional
 from app.config import get_settings
-from app.prompts.prompts import CALL_SUMMARY_PROMPT
+from app.prompts.common_prompts import CALL_SUMMARY_PROMPT
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+# Async client: streaming must never block the event loop (a blocked loop stops caller audio
+# being sent and received mid-reply, which is heard as choppy audio and missed interruptions)
+client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
-logger.info(f"🤖 Claude API initialized with key: {settings.anthropic_api_key[:20]}...")
+LIVE_MODEL = "claude-sonnet-5"
+SUMMARY_MODEL = "claude-haiku-4-5-20251001"
 
 
 # Words ending in "." that do not end a sentence ("Dr. Rao", "10 a.m. tomorrow")
@@ -42,34 +45,25 @@ async def stream_conversation(
     system_prompt: str,
     conversation_history: List[dict],
     max_tokens: int = 200,
-) -> Tuple[str, str]:
-    """Stream a response from Claude for real-time voice conversation.
+) -> AsyncGenerator[str, None]:
+    """Stream Claude's reply for a live call, yielding one complete sentence at a time for TTS.
 
     Args:
         system_prompt: The system prompt defining the agent's role and behavior
         conversation_history: List of {"role": "user|assistant", "content": "..."} dicts
         max_tokens: Maximum tokens for the response
-
-    Returns:
-        (full_response, sentence_queue) where sentence_queue is text ready for TTS
     """
-    logger.info(f"🗣️ Claude stream_conversation called with {len(conversation_history)} messages")
-    logger.info(f"📝 System prompt: {system_prompt[:200]}...")
-
-    full_response = ""
+    logger.debug(f"Claude reply requested ({len(conversation_history)} messages)")
     sentence_buffer = ""
 
     try:
-        logger.info(f"📤 Calling Claude API...")
-        with client.messages.stream(
-            model="claude-sonnet-5",
+        async with client.messages.stream(
+            model=LIVE_MODEL,
             max_tokens=max_tokens,
             system=system_prompt,
             messages=conversation_history,
         ) as stream:
-            logger.info(f"✅ Claude stream opened")
-            for text in stream.text_stream:
-                full_response += text
+            async for text in stream.text_stream:
                 sentence_buffer += text
 
                 # Yield complete sentences (ending with . ! or ?) for TTS
@@ -88,7 +82,7 @@ async def stream_conversation(
             yield sentence_buffer.strip()
 
     except anthropic.APIError as e:
-        print(f"Claude API error: {e}")
+        logger.error(f"Claude API error: {e}")
         raise
 
 
@@ -110,8 +104,8 @@ async def finalize_call_summary(
     extraction_prompt = CALL_SUMMARY_PROMPT.format(system_context=system_context, transcript=transcript)
 
     try:
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        response = await client.messages.create(
+            model=SUMMARY_MODEL,
             max_tokens=900,
             messages=[{"role": "user", "content": extraction_prompt}],
         )
@@ -127,14 +121,19 @@ async def finalize_call_summary(
 
         return json.loads(json_str)
 
-    except (json.JSONDecodeError, anthropic.APIError, IndexError) as e:
-        print(f"Error finalizing call: {e}")
+    except Exception as e:  # any failure (API, auth, bad JSON) must not stop the call being saved
+        logger.error(f"Call summary failed, saving the call without one: {e}")
         return {
+            "reached": None,
+            "identity_confirmed": None,
             "patient_name": None,
             "reason": None,
             "symptoms": [],
             "urgency": None,
+            "emergency_advice_given": None,
             "outcome": None,
+            "questions_for_doctor": None,
+            "language_support_needed": None,
             "summary": "Unable to process transcript",
             "sentiment": "unknown",
             "symptom_status": "unknown",

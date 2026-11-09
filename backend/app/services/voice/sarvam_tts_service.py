@@ -1,15 +1,20 @@
 """
-Sarvam WebSocket Text-to-Speech service.
-Supports IVR language selection.
-Returns Twilio-ready μ-law audio.
+Sarvam WebSocket text-to-speech, streamed as Twilio-ready 8 kHz mu-law.
+
+Each sentence uses its own Sarvam connection (config -> text -> flush -> audio... -> final), as
+before. To take the connection set-up off the critical path, the next connection is opened and
+configured in advance ("warm spare") while the current sentence plays. A spare that has gone
+stale is replaced, and a sentence retries once on a fresh connection if the spare fails.
 """
 
 import asyncio
+import audioop
+import base64
 import json
 import logging
-import base64
-import audioop
-from typing import Optional, AsyncGenerator
+import time
+from typing import AsyncGenerator, Optional
+
 import websockets
 from app.config import get_settings
 
@@ -17,12 +22,15 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 SARVAM_TTS_URL = "wss://api.sarvam.ai/text-to-speech/ws?model=bulbul:v3&send_completion_event=true"
+# A prepared connection older than this is not trusted (the server may have closed it)
+SPARE_MAX_AGE_SECONDS = 20.0
+FIRST_CHUNK_TIMEOUT = 5.0
+NEXT_CHUNK_TIMEOUT = 1.5
 
 
 class SarvamTTSService:
     def __init__(self):
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
-
         # IVR language map
         self.language_map = {
             "1": "te-IN",   # Telugu
@@ -32,43 +40,18 @@ class SarvamTTSService:
             "5": "ml-IN",   # Malayalam
             "6": "ta-IN",   # Tamil
         }
+        self._spare: Optional[tuple] = None  # (websocket, language_code, opened_at)
+        self._spare_task: Optional[asyncio.Task] = None
+        self._closed = False
 
     def get_language_code(self, digit: str) -> str:
-        """
-        Dynamic language from IVR selection.
-        """
         return self.language_map.get(digit, "en-IN")
 
-    async def connect(self):
-        """
-        Open a fresh Sarvam WebSocket connection.
-        """
-        self.ws = await websockets.connect(
-            SARVAM_TTS_URL,
-            extra_headers={
-                "api-subscription-key": settings.sarvam_api_key
-            }
-        )
-        logger.info("Sarvam TTS WebSocket connected")
+    # ---------- Connections ----------
 
-    async def ensure_session_ws(self, language_code: str):
-        """
-        Open a fresh WebSocket and send the config frame.
-        Called once per streaming session before text is sent.
-        """
-        # Close any existing connection first
-        if self.ws and not self.ws.closed:
-            try:
-                await self.ws.close()
-            except Exception:
-                pass
-
-        await self.connect()
-
-        # CONFIG — all fixes applied:
-        # - language_code (not target_language_code)
-        # - speech_sample_rate / sample_rate removed — not WebSocket params
-        # - speaker fixed to "ritu"
+    async def _open(self, language_code: str):
+        """Open a Sarvam connection and send its config frame."""
+        ws = await websockets.connect(SARVAM_TTS_URL, extra_headers={"api-subscription-key": settings.sarvam_api_key})
         config_message = {
             "type": "config",
             "data": {
@@ -79,184 +62,133 @@ class SarvamTTSService:
                 "min_buffer_size": 50,
                 "max_chunk_length": 200,
                 "output_audio_codec": "mulaw",
-                # No sample_rate — not a valid WebSocket config parameter
-            }
+            },
         }
+        await ws.send(json.dumps(config_message))
+        logger.debug("Sarvam TTS connection opened (%s)", language_code)
+        return ws
 
-        logger.info("Sending config: %s", config_message)
-        await self.ws.send(json.dumps(config_message))
-
-    async def stream_tts(
-        self,
-        text: str,
-        selected_digit: str,
-        call_sid: str = ""
-    ) -> AsyncGenerator[bytes, None]:
-        """
-        Streams μ-law audio chunks as they arrive from Sarvam.
-        Downsamples 24kHz → 8kHz via audioop for Twilio compatibility.
-        Yields each chunk immediately — first audio in under 200ms.
-
-        Usage in twilio_service.py:
-            async for chunk in self.sarvam_tts.stream_tts(
-                clean_sentence, self.selected_digit, self.call_sid
-            ):
-                # send chunk to Twilio
-        """
-        language_code = self.get_language_code(selected_digit)
-
-        await self.ensure_session_ws(language_code)
-
+    async def _make_spare(self, language_code: str) -> None:
         try:
-            # STEP 2: TEXT
-            text_message = {
-                "type": "text",
-                "data": {
-                    "text": text
-                }
-            }
-            logger.info("Sending text [call_sid=%s]: %s", call_sid, text_message)
-            await self.ws.send(json.dumps(text_message))
+            ws = await self._open(language_code)
+        except Exception as exc:
+            logger.debug("Sarvam spare connection failed: %s", exc)
+            return
+        if self._closed:
+            await _close_quietly(ws)
+            return
+        self._spare = (ws, language_code, time.monotonic())
 
-            # STEP 3: FLUSH
-            logger.info("Sending flush [call_sid=%s]", call_sid)
-            await self.ws.send(json.dumps({"type": "flush"}))
+    def prewarm(self, selected_digit: str) -> None:
+        """Open the next sentence's connection in the background."""
+        if self._closed or self._spare or (self._spare_task and not self._spare_task.done()):
+            return
+        self._spare_task = asyncio.create_task(self._make_spare(self.get_language_code(selected_digit)))
 
-            is_first_chunk = True
+    async def _take_connection(self, language_code: str):
+        """The prepared connection if it is usable, else a new one. Returns (websocket, was_spare)."""
+        if self._spare_task and not self._spare_task.done():
+            try:
+                await self._spare_task  # still faster than starting a new connection from scratch
+            except Exception:
+                pass
+        self._spare_task = None
+        spare, self._spare = self._spare, None
+        if spare:
+            ws, lang, opened_at = spare
+            if lang == language_code and not ws.closed and time.monotonic() - opened_at < SPARE_MAX_AGE_SECONDS:
+                return ws, True
+            await _close_quietly(ws)
+        return await self._open(language_code), False
 
-            # Carry resampling state across chunks to avoid
-            # clicks or discontinuities at chunk boundaries
-            resample_state = None
+    # ---------- Streaming ----------
 
+    async def stream_tts(self, text: str, selected_digit: str, call_sid: str = "") -> AsyncGenerator[bytes, None]:
+        """Stream 8 kHz mu-law audio chunks for one sentence as they arrive from Sarvam."""
+        language_code = self.get_language_code(selected_digit)
+        ws, was_spare = await self._take_connection(language_code)
+        self.ws = ws
+        try:
+            try:
+                await ws.send(json.dumps({"type": "text", "data": {"text": text}}))
+                await ws.send(json.dumps({"type": "flush"}))
+            except Exception:
+                if not was_spare:
+                    raise
+                # The prepared connection had gone stale: retry once on a fresh one
+                await _close_quietly(ws)
+                ws = await self._open(language_code)
+                self.ws = ws
+                await ws.send(json.dumps({"type": "text", "data": {"text": text}}))
+                await ws.send(json.dumps({"type": "flush"}))
+            logger.debug("Sarvam text sent [call_sid=%s] (%d chars)", call_sid, len(text))
+
+            first = True
+            resample_state = None  # carried across chunks so chunk boundaries don't click
             while True:
                 try:
-                    # Longer timeout for first chunk (model warm-up), shorter for
-                    # subsequent chunks. The "final" event normally ends the loop; these
-                    # only matter if it never comes, and too short cuts sentences off.
-                    current_timeout = 5.0 if is_first_chunk else 1.5
-                    msg = await asyncio.wait_for(
-                        self.ws.recv(),
-                        timeout=current_timeout
-                    )
-
-                    data = json.loads(msg)
-                    logger.info(
-                        "Sarvam message type: %s [call_sid=%s]",
-                        data.get("type"),
-                        call_sid
-                    )
-
-                    # Audio chunk — correct μ-law 24kHz → 8kHz for Twilio
-                    if data.get("type") == "audio":
-                        is_first_chunk = False
-                        raw_mulaw = base64.b64decode(data["data"]["audio"])
-
-                        # Step 1: Decode μ-law → linear PCM (16-bit)
-                        pcm_24k = audioop.ulaw2lin(raw_mulaw, 2)
-
-                        # Step 2: Resample 24kHz → 8kHz with anti-aliasing.
-                        # resample_state is carried across chunks to prevent
-                        # boundary artifacts between consecutive chunks.
-                        pcm_8k, resample_state = audioop.ratecv(
-                            pcm_24k,
-                            2,              # 16-bit samples (2 bytes)
-                            1,              # mono
-                            24000,          # Sarvam native output rate
-                            8000,           # Twilio required rate
-                            resample_state  # filter state across chunks
-                        )
-
-                        # Step 3: Re-encode linear PCM → μ-law
-                        mulaw_8k = audioop.lin2ulaw(pcm_8k, 2)
-
-                        yield mulaw_8k
-
-                    # Completion event — exit loop cleanly
-                    elif data.get("type") == "event":
-                        event_type = data.get("data", {}).get("event_type")
-                        logger.info(
-                            "Received event: %s [call_sid=%s]",
-                            event_type,
-                            call_sid
-                        )
-                        if event_type == "final":
-                            logger.info(
-                                "Final event received — stream complete [call_sid=%s]",
-                                call_sid
-                            )
-                            break
-
+                    msg = await asyncio.wait_for(ws.recv(), timeout=FIRST_CHUNK_TIMEOUT if first else NEXT_CHUNK_TIMEOUT)
                 except asyncio.TimeoutError:
-                    logger.warning(
-                        "Timeout waiting for Sarvam audio chunk — "
-                        "assuming stream complete [call_sid=%s]",
-                        call_sid
-                    )
+                    logger.warning("Sarvam audio timed out; treating the sentence as complete [call_sid=%s]", call_sid)
                     break
-
+                data = json.loads(msg)
+                kind = data.get("type")
+                if kind == "audio":
+                    first = False
+                    raw_mulaw = base64.b64decode(data["data"]["audio"])
+                    pcm_24k = audioop.ulaw2lin(raw_mulaw, 2)  # mu-law -> 16-bit PCM
+                    pcm_8k, resample_state = audioop.ratecv(pcm_24k, 2, 1, 24000, 8000, resample_state)
+                    yield audioop.lin2ulaw(pcm_8k, 2)
+                elif kind == "event":
+                    if data.get("data", {}).get("event_type") == "final":
+                        break
+                elif kind == "error":
+                    logger.error("Sarvam TTS error [call_sid=%s]: %s", call_sid, data.get("data"))
+                    break
         finally:
-            # Always close the WebSocket after each streaming request
-            if self.ws and not self.ws.closed:
-                try:
-                    await self.ws.close()
-                    logger.info(
-                        "Sarvam TTS WebSocket closed [call_sid=%s]",
-                        call_sid
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "Error closing WebSocket [call_sid=%s]: %s",
-                        call_sid,
-                        e
-                    )
+            await _close_quietly(ws)
+            self.ws = None
+            self.prewarm(selected_digit)  # get the next sentence's connection ready
 
     async def close(self, call_sid: str = ""):
-        """
-        Close WebSocket session.
-        Called by twilio_service.py on cleanup and language switching.
-        """
-        if self.ws and not self.ws.closed:
-            try:
-                await self.ws.close()
-                logger.info(
-                    "Sarvam TTS WebSocket closed via close() [call_sid=%s]",
-                    call_sid
-                )
-            except Exception as e:
-                logger.warning(
-                    "Error in close() [call_sid=%s]: %s",
-                    call_sid,
-                    e
-                )
-            finally:
-                self.ws = None
+        """Close every connection (end of call)."""
+        self._closed = True
+        if self._spare_task and not self._spare_task.done():
+            self._spare_task.cancel()
+        spare, self._spare = self._spare, None
+        if spare:
+            await _close_quietly(spare[0])
+        if self.ws:
+            await _close_quietly(self.ws)
+            self.ws = None
+        logger.debug("Sarvam TTS closed [call_sid=%s]", call_sid)
 
     async def text_to_speech(self, text: str, selected_digit: str) -> bytes:
-        """
-        Non-streaming fallback. Accumulates all chunks and returns
-        a single bytes object. Use stream_tts for live calls.
-        """
+        """Non-streaming helper: the whole sentence as one mu-law buffer."""
         audio_chunks = []
-
-        async for chunk in self.stream_tts(text, selected_digit):
-            audio_chunks.append(chunk)
-
+        stream = self.stream_tts(text, selected_digit)
+        try:
+            async for chunk in stream:
+                audio_chunks.append(chunk)
+        finally:
+            await stream.aclose()
         if not audio_chunks:
-            logger.error("No audio received from Sarvam TTS")
             raise RuntimeError("Sarvam TTS returned no audio")
+        return b"".join(audio_chunks)
 
-        final_audio = b"".join(audio_chunks)
-        logger.info(
-            "TTS complete: %d chunks, %d bytes total",
-            len(audio_chunks),
-            len(final_audio)
-        )
-        return final_audio
+
+async def _close_quietly(ws) -> None:
+    try:
+        if ws and not ws.closed:
+            await ws.close()
+    except Exception:
+        pass
 
 
 async def text_to_mulaw(text: str, selected_digit: str) -> bytes:
-    """
-    Compatibility layer for services expecting text_to_mulaw.
-    """
+    """Compatibility layer for services expecting text_to_mulaw."""
     srv = SarvamTTSService()
-    return await srv.text_to_speech(text, selected_digit)
+    try:
+        return await srv.text_to_speech(text, selected_digit)
+    finally:
+        await srv.close()

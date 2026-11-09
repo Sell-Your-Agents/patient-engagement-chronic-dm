@@ -8,9 +8,13 @@ DIABETES_PROTOCOL = {
         {"id": "exercise", "text": "How much physical activity have you had? Do you exercise most days?", "category": "lifestyle"},
     ],
     "red_flag_criteria": [
+        {"id": "hypoglycemia", "description": "Low sugar symptoms: shaky, sweaty, confused, faint, or a reading below 70 mg/dL", "severity": "urgent"},
         {"id": "high_glucose", "description": "Fasting glucose consistently above 300 mg/dL", "severity": "urgent"},
+        {"id": "dka_signs", "description": "High sugar with vomiting, deep fast breathing or drowsiness", "severity": "urgent"},
+        {"id": "chest_pain", "description": "Chest pain or pressure", "severity": "urgent"},
         {"id": "severe_fatigue", "description": "Report of severe, unexplained fatigue", "severity": "high"},
         {"id": "vision_changes", "description": "Vision changes or eye pain reported", "severity": "high"},
+        {"id": "foot_wound", "description": "New foot wound, ulcer or a darkened toe", "severity": "high"},
         {"id": "non_adherence", "description": "Consistent medication non-adherence reported", "severity": "high"},
     ],
     "education_talking_points": [
@@ -36,6 +40,7 @@ HYPERTENSION_PROTOCOL = {
         {"id": "stress", "text": "How would you describe your stress levels?", "category": "lifestyle"},
     ],
     "red_flag_criteria": [
+        {"id": "stroke_signs", "description": "Signs of a stroke: face drooping, arm or leg weakness, slurred or confused speech", "severity": "urgent"},
         {"id": "severe_hypertension", "description": "BP consistently above 180/120 mmHg", "severity": "urgent"},
         {"id": "chest_pain", "description": "Chest pain or pressure reported", "severity": "urgent"},
         {"id": "severe_headache", "description": "Severe headache with vision changes", "severity": "high"},
@@ -64,6 +69,7 @@ COPD_PROTOCOL = {
     ],
     "red_flag_criteria": [
         {"id": "severe_dyspnea", "description": "Severe shortness of breath at rest", "severity": "urgent"},
+        {"id": "chest_pain", "description": "Chest pain or pressure", "severity": "urgent"},
         {"id": "productive_cough", "description": "Cough with colored sputum or blood", "severity": "urgent"},
         {"id": "fever", "description": "Fever with respiratory symptoms", "severity": "high"},
     ],
@@ -85,7 +91,7 @@ ASTHMA_PROTOCOL = {
         {"id": "shortness_of_breath", "text": "Have you had any episodes of shortness of breath? How many this month?", "category": "symptom"},
         {"id": "night_symptoms", "text": "Have you woken up at night due to asthma symptoms?", "category": "symptom"},
         {"id": "triggers", "text": "What are your known asthma triggers? Have you been exposed to them?", "category": "symptom"},
-        {"id": "rescue_inhaler_use", "text": "How often are you using your rescue inhaler? (More than 2 times/week suggests poor control)", "category": "adherence"},
+        {"id": "rescue_inhaler_use", "text": "How often have you used your rescue inhaler this week?", "category": "adherence"},
         {"id": "controller_medication", "text": "Are you taking your controller medication as prescribed?", "category": "adherence"},
         {"id": "activity_level", "text": "Are you able to exercise without triggering asthma symptoms?", "category": "lifestyle"},
     ],
@@ -106,3 +112,61 @@ ASTHMA_PROTOCOL = {
     "escalation_instructions": "Severe attacks or poor control despite treatment should be escalated for care plan adjustment.",
     "default_followup_interval_days": 30,
 }
+
+# Seed data per condition code (seed.py inserts these once; sync_protocol_content keeps old DBs current)
+PROTOCOLS_BY_CODE = {
+    "T2DM": DIABETES_PROTOCOL,
+    "HTN": HYPERTENSION_PROTOCOL,
+    "COPD": COPD_PROTOCOL,
+    "ASTHMA": ASTHMA_PROTOCOL,
+}
+
+
+async def sync_protocol_content(db, apply: bool = False) -> list:
+    """Bring protocols already in the database up to date with the seed data above.
+
+    seed.py only inserts protocols once, so a red flag added here later (for example
+    hypoglycemia or stroke_signs) would never reach an existing database. This adds any red
+    flag whose id is missing and refreshes question wording by id. Intervals, call times and
+    anything staff changed in the app are left alone.
+
+    Never runs on its own: use backend/scripts/sync_protocols.py. With apply=False (the default)
+    nothing is written; it only returns the list of changes it would make.
+    """
+    from sqlalchemy import select
+
+    from app.models.condition import ChronicCondition
+    from app.models.disease_protocol import DiseaseProtocol
+
+    rows = (
+        await db.execute(
+            select(DiseaseProtocol, ChronicCondition)
+            .join(ChronicCondition, ChronicCondition.id == DiseaseProtocol.condition_id)
+            .where(ChronicCondition.code.in_(list(PROTOCOLS_BY_CODE)))
+        )
+    ).all()
+    changes = []
+    for protocol, condition in rows:
+        seed = PROTOCOLS_BY_CODE[condition.code]
+
+        flags = list(protocol.red_flag_criteria or [])
+        known = {f.get("id") for f in flags if isinstance(f, dict)}
+        missing = [dict(f) for f in seed["red_flag_criteria"] if f["id"] not in known]
+        for flag in missing:
+            changes.append(f"{condition.code} protocol #{protocol.id}: add red flag '{flag['id']}' ({flag['severity']})")
+        if missing and apply:
+            protocol.red_flag_criteria = flags + missing  # new list so SQLAlchemy saves the JSON change
+
+        seed_text = {q["id"]: q["text"] for q in seed["assessment_questions"]}
+        questions = [dict(q) if isinstance(q, dict) else q for q in (protocol.assessment_questions or [])]
+        updated = False
+        for q in questions:
+            if isinstance(q, dict) and q.get("id") in seed_text and q.get("text") != seed_text[q["id"]]:
+                changes.append(f"{condition.code} protocol #{protocol.id}: reword question '{q['id']}'")
+                q["text"] = seed_text[q["id"]]
+                updated = True
+        if updated and apply:
+            protocol.assessment_questions = questions
+    if changes and apply:
+        await db.commit()
+    return changes
