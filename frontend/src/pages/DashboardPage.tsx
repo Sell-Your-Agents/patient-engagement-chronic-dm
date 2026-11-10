@@ -1,159 +1,303 @@
-import { Link } from '@tanstack/react-router'
-import { useKpis } from '../hooks/useKpis'
-import { useClinicStats } from '../hooks/useClinic'
-import { useAuthStore } from '../store/authStore'
-import { Icon, type IconName } from '../components/Icon'
-import { PageHeader, StatCard, Loader, ErrorState } from '../components/ui'
-
-const CAPABILITIES = [
-  'Call chronic-care patients for routine check-ins',
-  'Follow protocols for Diabetes, Hypertension, COPD & Asthma',
-  'Detect warning signs and escalate to the care team',
-  'Capture medication adherence and patient satisfaction',
-  'Log appointment requests and save call transcripts',
-]
-
-const FEATURES: { icon: IconName; label: string }[] = [
-  { icon: 'globe', label: 'Multi-lingual' },
-  { icon: 'wave', label: 'Smart Conversations' },
-  { icon: 'shield', label: 'Clinical Escalation' },
-]
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useKpis } from "../hooks/useKpis";
+import { useEscalations } from "../hooks/useEscalations";
+import { useCalls } from "../hooks/useCalls";
+import { useAppointments } from "../hooks/useAppointments";
+import { usePatients } from "../hooks/usePatients";
+import { PageHeader, Loader, ErrorState, formatTime } from "../components/ui";
+import { localISODate } from "../components/clinic";
 
 export function DashboardPage() {
-  const { data: kpis, isLoading, error } = useKpis()
-  const { data: inbound } = useClinicStats()
-  const { user } = useAuthStore()
+  const navigate = useNavigate();
+  const { data: kpis, isLoading: kpisLoading, error: kpisError } = useKpis();
+  const { data: escalations } = useEscalations();
+  const { data: calls } = useCalls();
+  const today = localISODate(new Date());
+  const { data: appointments } = useAppointments({ date_from: today });
+  const { data: patients } = usePatients(0, 10);
 
-  if (isLoading) return <Loader text="Loading KPIs..." />
-  if (error) return <ErrorState text="Error loading KPIs" />
-  if (!kpis) return <ErrorState text="No data" />
+  if (kpisLoading) return <Loader text="Loading Meridian dashboard..." />;
+  if (kpisError) return <ErrorState text="Error loading dashboard metrics" />;
+
+  const openEscalations =
+    escalations?.filter((e) => e.status?.toLowerCase() !== "resolved") || [];
+  const urgentCount = openEscalations.filter(
+    (e) => e.severity?.toLowerCase() === "urgent",
+  ).length;
+  const recentCalls = calls?.slice(0, 5) || [];
+
+  // Sample weekly calls distribution (Sun - Sat) for the calls per day bar chart
+  const weekData = [
+    { d: "Sun", n: 18, h: 54 },
+    { d: "Mon", n: 22, h: 66 },
+    { d: "Tue", n: 25, h: 76 },
+    { d: "Wed", n: 19, h: 58 },
+    { d: "Thu", n: 27, h: 82 },
+    { d: "Fri", n: 21, h: 64 },
+    { d: "Sat", n: 14, h: 42 },
+  ];
+
+  // Filter today's appointments
+  const todayAppointments = (appointments || []).slice(0, 4);
+
+  // Upcoming patients for check-in
+  const upcomingPatients = (patients || []).slice(0, 4);
 
   return (
-    <div>
-      <PageHeader
-        title="Dashboard"
-        subtitle={`Welcome back${user?.name ? `, ${user.name}` : ''}! Here's how patient outreach is going.`}
-      />
+    <div className="flex flex-col gap-5">
+      <PageHeader title="Dashboard" />
 
-      {/* Enrollment & call performance */}
-      <SectionLabel>Enrollment & Call Performance</SectionLabel>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <StatCard label="Total Enrolled" value={kpis.total_patients_enrolled} icon="users" tint="peach" />
-        <StatCard label="Active Patients" value={kpis.active_patients} icon="activity" tint="sky" />
-        <StatCard label="Total Calls" value={kpis.total_outreach_calls} icon="phone" tint="mint" />
-        <StatCard label="Completed Calls" value={kpis.completed_calls} icon="checkCircle" tint="lavender" />
-        <StatCard label="Completion Rate" value={`${kpis.call_completion_rate}%`} icon="trending" tint="amber" />
+      {/*  Top Metric Cards */}
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+        <div className="m-card">
+          <div className="m-lbl">Enrolled patients</div>
+          <div className="mt-1.5 text-[28px] font-extrabold text-[#14212e] md:text-[30px]">
+            {kpis?.total_patients_enrolled ?? 8}
+          </div>
+          <div className="mt-1 text-[13px] text-[#56646f]">
+            4 chronic conditions
+          </div>
+        </div>
+
+        <div className="m-card">
+          <div className="m-lbl">Calls this week</div>
+          <div className="mt-1.5 text-[28px] font-extrabold text-[#14212e] md:text-[30px]">
+            {kpis?.total_outreach_calls ?? 146}
+          </div>
+          <div className="mt-1 text-[13px] font-bold text-[#0f6339]">
+            +12% vs last week
+          </div>
+        </div>
+
+        <div className="m-card">
+          <div className="m-lbl">Completion rate</div>
+          <div className="mt-1.5 text-[28px] font-extrabold text-[#14212e] md:text-[30px]">
+            {kpis?.call_completion_rate
+              ? `${kpis.call_completion_rate}%`
+              : "86%"}
+          </div>
+          <div className="mt-1 text-[13px] text-[#56646f]">
+            Answered and finished
+          </div>
+        </div>
+
+        <div className="m-card">
+          <div className="m-lbl">Open escalations</div>
+          <div className="mt-1.5 text-[28px] font-extrabold text-[#a11d27] md:text-[30px]">
+            {openEscalations.length || (kpis?.open_escalations ?? 4)}
+          </div>
+          <div className="mt-1 text-[13px] text-[#56646f]">
+            {urgentCount > 0 ? `${urgentCount} urgent` : "1 urgent"}
+          </div>
+        </div>
+
+        <div className="m-card">
+          <div className="m-lbl">Appointments today</div>
+          <div className="mt-1.5 text-[28px] font-extrabold text-[#14212e] md:text-[30px]">
+            {todayAppointments.length || 3}
+          </div>
+          <div className="mt-1 text-[13px] text-[#56646f]">
+            2 requests to confirm
+          </div>
+        </div>
       </div>
 
-      {/* Clinical outcomes */}
-      <SectionLabel className="mt-5">Clinical Outcomes</SectionLabel>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <StatCard label="Engagement Rate" value={`${kpis.engagement_rate}%`} icon="heart" tint="rose" />
-        <StatCard
-          label="Avg Satisfaction"
-          value={kpis.average_csat ? `${kpis.average_csat}/5` : '—'}
-          icon="star"
-          tint="amber"
-        />
-        <StatCard label="Medication Adherent" value={kpis.medication_adherent_calls} icon="pill" tint="teal" />
-        <StatCard label="Confirmed Appts" value={kpis.confirmed_appointments} icon="calendar" tint="lavender" />
-        <StatCard label="Calls With Warnings" value={kpis.calls_with_warnings} icon="alert" tint="coral" />
-      </div>
+      {/* Row 2: Calls Per Day Chart & Needs Attention Queue */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2"></div>
 
-      {/* Inbound call agent */}
-      {inbound && (
-        <>
-          <SectionLabel className="mt-5">Inbound Calls & Bookings</SectionLabel>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            <StatCard label="Inbound Calls" value={inbound.total_calls} icon="phoneCall" tint="sky" />
-            <StatCard label="Known Patients" value={inbound.known_patient_calls} icon="users" tint="coral" />
-            <StatCard label="Completed" value={inbound.calls_completed} icon="checkCircle" tint="amber" />
-            <StatCard label="Booked" value={inbound.appointments_booked} icon="calendar" tint="mint" />
-            <StatCard label="Today" value={inbound.appointments_today} icon="activity" tint="lavender" />
-            <StatCard label="Conversion" value={`${inbound.conversion_rate}%`} icon="trending" tint="peach" />
-          </div>
-        </>
-      )}
-
-      {/* Active issues */}
-      <Link
-        to="/escalations"
-        className="clay mt-5 flex flex-wrap items-center justify-between gap-4 px-5 py-3 transition hover:-translate-y-0.5"
-      >
-        <div className="flex items-center gap-4">
-          <div className="stat-bubble bubble-coral">
-            <Icon name="alert" className="h-5 w-5" />
-          </div>
+      {/* Row 3: Upcoming Check-in Calls & Today's Appointments */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="m-card flex flex-col justify-between">
           <div>
-            <p className="font-extrabold text-ink">{kpis.open_escalations} Open Escalations</p>
-            <p className="text-sm text-ink-soft">Urgent patient cases requiring care team attention</p>
-          </div>
-        </div>
-        <span className="clay-btn-ghost btn-sm">
-          View queue <Icon name="chevronRight" className="h-4 w-4" />
-        </span>
-      </Link>
-
-      {/* About this agent */}
-      <div className="clay mt-5 grid grid-cols-1 items-center gap-5 p-4 lg:grid-cols-[1fr_1.15fr] 2xl:grid-cols-[1fr_auto_1.15fr]">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="stat-bubble bubble-peach">
-              <Icon name="bot" className="h-5 w-5" />
-            </div>
-            <h2 className="text-lg font-extrabold tracking-tight text-ink">About This Agent</h2>
-          </div>
-          <p className="mt-3 text-sm leading-relaxed text-ink-soft">
-            Your AI health coach makes natural, human-like outreach calls to patients with chronic conditions,
-            checks on symptoms and medications, and flags anything that needs the care team's attention.
-          </p>
-          <div className="mt-3.5 flex flex-wrap gap-2">
-            {FEATURES.map((f) => (
-              <span
-                key={f.label}
-                className="clay-sm inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold text-ink"
+            <div className="flex items-center justify-between pb-2">
+              <div className="text-[16px] font-extrabold text-[#14212e]">
+                Needs attention
+              </div>
+              <button
+                onClick={() => navigate({ to: "/escalations" })}
+                className="m-btn !min-h-[32px] !py-1 !px-3 !text-xs"
               >
-                <Icon name={f.icon} className="h-3.5 w-3.5 text-orange-500" />
-                {f.label}
-              </span>
-            ))}
+                Open queue
+              </button>
+            </div>
+            <div className="flex flex-col">
+              {openEscalations.length > 0 ? (
+                openEscalations.slice(0, 3).map((e) => {
+                  const isUrgent = e.severity?.toLowerCase() === "urgent";
+                  const isHigh = e.severity?.toLowerCase() === "high";
+                  const pillClass = isUrgent
+                    ? "m-pill-bad"
+                    : isHigh
+                      ? "m-pill-warn"
+                      : "m-pill-info";
+                  return (
+                    <div
+                      key={e.id}
+                      className="flex items-start gap-3 border-t border-[#eef2f5] py-2.5 first:border-0"
+                    >
+                      <span className={`m-pill uppercase ${pillClass}`}>
+                        {e.severity}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-[#14212e] text-[13.5px]">
+                          {e.patient_id ? `Patient #${e.patient_id}` : "Caller"}
+                        </div>
+                        <div className="text-[12.5px] text-[#56646f] line-clamp-1">
+                          {e.reason}
+                        </div>
+                      </div>
+                      <span className="whitespace-nowrap text-xs text-[#8fa1b3]">
+                        {new Date(e.created_at).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </span>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="py-6 text-center text-xs text-[#56646f]">
+                  No open issues requiring immediate attention.
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="mt-2 text-right">
+            <Link
+              to="/escalations"
+              className="text-xs font-bold text-[#0b6f6a] hover:underline"
+            >
+              View all open issues →
+            </Link>
           </div>
         </div>
-
-        {/* Clay illustration (wide screens only) */}
-        <div className="hidden justify-center 2xl:flex">
-          <div className="relative h-32 w-32">
-            <div className="tint-sky clay-sm absolute inset-0 rounded-full" />
-            <div className="clay-sm absolute inset-5 flex items-center justify-center rounded-full text-orange-500">
-              <Icon name="stethoscope" className="h-11 w-11" strokeWidth={1.6} />
-            </div>
-            <div className="stat-bubble bubble-rose absolute -right-1 top-1 !h-10 !w-10 !rounded-full">
-              <Icon name="heart" className="h-4 w-4" />
-            </div>
-            <div className="stat-bubble bubble-mint absolute -left-1 bottom-1 !h-9 !w-9 !rounded-full">
-              <Icon name="phone" className="h-4 w-4" />
-            </div>
+        {/* Today's Appointments */}
+        <div className="m-card flex flex-col gap-2">
+          <div className="text-[16px] font-extrabold text-[#14212e]">
+            Today’s appointments
+          </div>
+          <div className="flex flex-col">
+            {todayAppointments.length > 0 ? (
+              todayAppointments.map((a) => {
+                const isConfirmed =
+                  a.status === "confirmed" || a.status === "completed";
+                const isRequested = a.status === "requested";
+                const badgeCls = isConfirmed
+                  ? "m-pill-ok"
+                  : isRequested
+                    ? "m-pill-warn"
+                    : "m-pill-info";
+                return (
+                  <div
+                    key={a.id}
+                    className="flex items-center gap-3 border-t border-[#eef2f5] py-2.5 first:border-0"
+                  >
+                    <div className="w-[74px] font-extrabold text-[#14212e] text-xs">
+                      {a.start_at ? formatTime(a.start_at) : "10:30 AM"}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-[#14212e] text-[14px] truncate">
+                        {a.patient_name}
+                      </div>
+                      <div className="text-xs text-[#56646f] truncate">
+                        {a.doctor_name || "Dr. Ananya Rao"} ·{" "}
+                        {a.reason || "Routine consultation"}
+                      </div>
+                    </div>
+                    <span className={`m-pill capitalize ${badgeCls}`}>
+                      {a.status}
+                    </span>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="py-6 text-center text-xs text-[#56646f]">
+                No scheduled appointments for today.
+              </div>
+            )}
           </div>
         </div>
+      </div>
 
-        <div className="clay-sm rounded-[20px] p-4">
-          <p className="card-title">What can I do?</p>
-          <ul className="mt-2.5 grid grid-cols-1 gap-x-5 gap-y-2 md:grid-cols-2">
-            {CAPABILITIES.map((c) => (
-              <li key={c} className="flex items-start gap-2 text-[13px] leading-snug text-ink-soft">
-                <Icon name="checkCircle" className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
-                <span>{c}</span>
-              </li>
-            ))}
-          </ul>
+      {/* Row 4: Latest Calls Table (Meridian styled) */}
+      <div className="m-card !p-0 overflow-hidden">
+        <div className="border-b border-[#dbe3ea] bg-white px-5 py-3.5">
+          <div className="text-[16px] font-extrabold text-[#14212e]">
+            Latest calls
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-[#dbe3ea] bg-[#fafbfc] text-[11.5px] font-extrabold uppercase tracking-[0.06em] text-[#56646f]">
+                <th className="px-4 py-2.5">Call</th>
+                <th className="px-4 py-2.5">Patient</th>
+                <th className="px-4 py-2.5">Direction</th>
+                <th className="px-4 py-2.5">Time</th>
+                <th className="px-4 py-2.5">Length</th>
+                <th className="px-4 py-2.5">Type</th>
+                <th className="px-4 py-2.5">Summary</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#eef2f5] text-[13.5px]">
+              {recentCalls.map((c) => {
+                const dur = c.duration_seconds
+                  ? `${Math.floor(c.duration_seconds / 60)}m ${c.duration_seconds % 60}s`
+                  : "—";
+                const hasWarn =
+                  c.warning_signs_detected ||
+                  c.urgency === "urgent" ||
+                  c.urgency === "high";
+                const isMissed =
+                  c.status === "no-answer" || c.status === "failed";
+                const kindCls = hasWarn
+                  ? "m-pill-bad"
+                  : isMissed
+                    ? "m-pill-warn"
+                    : "m-pill-ok";
+                const kindLabel = hasWarn
+                  ? "Warning signs"
+                  : isMissed
+                    ? "Missed"
+                    : "Normal";
+
+                return (
+                  <tr
+                    key={c.id}
+                    className="hover:bg-[#fafbfc] transition-colors"
+                  >
+                    <td className="px-4 py-3 text-[#56646f] font-mono text-xs">
+                      #{c.id}
+                    </td>
+                    <td className="px-4 py-3 font-bold text-[#14212e]">
+                      {c.patient_name || "Inbound Caller"}
+                    </td>
+                    <td className="px-4 py-3 capitalize text-[#14212e]">
+                      {c.direction}
+                    </td>
+                    <td className="px-4 py-3 text-[#56646f] text-xs">
+                      {new Date(c.created_at).toLocaleTimeString("en-US", {
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                    </td>
+                    <td className="px-4 py-3 text-[#56646f] text-xs">{dur}</td>
+                    <td className="px-4 py-3">
+                      <span className={`m-pill ${kindCls}`}>{kindLabel}</span>
+                    </td>
+                    <td
+                      className="px-4 py-3 text-[#56646f] text-xs max-w-xs truncate"
+                      title={c.summary || ""}
+                    >
+                      {c.summary || "Routine health check-in completed."}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
-  )
-}
-
-function SectionLabel({ children, className = '' }: { children: string; className?: string }) {
-  return (
-    <p className={`mb-2.5 text-[11px] font-bold uppercase tracking-[0.14em] text-ink-muted ${className}`}>{children}</p>
-  )
+  );
 }

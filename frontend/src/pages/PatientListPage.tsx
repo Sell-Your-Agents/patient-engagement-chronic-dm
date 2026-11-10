@@ -2,7 +2,7 @@ import { usePatients, useInitiateCall } from '../hooks/usePatients'
 import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Icon } from '../components/Icon'
-import { PageHeader, StatCard, StatusBadge, EmptyState, Loader, ErrorState, paginate, Pagination } from '../components/ui'
+import { PageHeader, StatusBadge, EmptyState, Loader, ErrorState, paginate, Pagination } from '../components/ui'
 
 export function PatientListPage() {
   const { data: patients, isLoading, error } = usePatients(0, 100)
@@ -16,7 +16,7 @@ export function PatientListPage() {
   if (isLoading) return <Loader text="Loading patients..." />
   if (error) return <ErrorState text="Error loading patients" />
 
-  const activePatients = patients?.filter((p) => p.status === 'active') || []
+  const totalPatients = patients?.length || 0
   const query = search.trim().toLowerCase()
   const filtered =
     patients?.filter(
@@ -26,7 +26,7 @@ export function PatientListPage() {
         p.mrn.toLowerCase().includes(query) ||
         p.phone_number.includes(query)
     ) || []
-  const paged = paginate(filtered, page, setPage, 7)
+  const paged = paginate(filtered, page, setPage, 8)
 
   const startCall = (patientId: number) => {
     setCallMessage(null)
@@ -43,93 +43,116 @@ export function PatientListPage() {
   }
 
   return (
-    <div>
-      <PageHeader title="Patients" subtitle="Manage enrolled patients and start outreach calls." />
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <StatCard label="Total Patients" value={patients?.length || 0} icon="users" tint="peach" />
-        <StatCard label="Active" value={activePatients.length} icon="activity" tint="mint" />
-      </div>
-
-      {/* Patient List */}
-      <div className="clay mt-6 overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3 p-5">
-          <p className="card-title">All Patients</p>
-          <div className="relative w-full sm:w-72">
-            <Icon name="search" className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
+    <div className="flex flex-col gap-4">
+      <PageHeader
+        title="Patients"
+        subtitle={`${totalPatients} enrolled patients · click View to open a patient dashboard`}
+        actions={
+          <div className="relative w-64">
+            <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8fa1b3]" />
             <input
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value)
                 setPage(1)
               }}
-              placeholder="Search name, MRN or phone"
-              className="clay-input !py-2.5 !pl-10"
+              placeholder="Search patient, MRN or phone"
+              className="w-full rounded-[10px] border border-[#cdd7df] bg-white py-2 pl-9 pr-3 text-sm text-[#14212e] outline-none transition focus:border-[#0f8f87]"
             />
           </div>
+        }
+      />
+
+      {callMessage && (
+        <div
+          className={`rounded-lg px-4 py-2.5 text-xs font-bold ${
+            callMessage.ok ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+          }`}
+        >
+          {callMessage.text}
         </div>
-        <div>
-          <table className="clay-table w-full">
+      )}
+
+      {/* Patient Table - Meridian style */}
+      <div className="m-card !p-0 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-left">
             <thead>
-              <tr>
-                <th>Name</th>
-                <th className="col-lg">MRN</th>
-                <th>Phone</th>
-                <th>Status</th>
-                <th>Action</th>
+              <tr className="border-b border-[#dbe3ea] bg-[#fafbfc] text-[11.5px] font-extrabold uppercase tracking-[0.06em] text-[#56646f]">
+                <th className="px-4 py-2.5">Patient</th>
+                <th className="px-4 py-2.5">MRN & Phone</th>
+                <th className="px-4 py-2.5">Language</th>
+                <th className="px-4 py-2.5">Status</th>
+                <th className="px-4 py-2.5 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody>
-              {paged.pageItems.map((patient) => (
-                <tr key={patient.id}>
-                  <td>
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-extrabold text-orange-600">
-                        {patient.first_name.charAt(0)}
-                        {patient.last_name.charAt(0)}
-                      </span>
-                      <span className="font-bold text-ink">
-                        {patient.first_name} {patient.last_name}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="col-lg font-mono text-ink-soft">{patient.mrn}</td>
-                  <td className="font-semibold text-ink">{patient.phone_number}</td>
-                  <td>
-                    <StatusBadge status={patient.status} />
-                  </td>
-                  <td>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={() => startCall(patient.id)}
-                        disabled={isInitiating}
-                        title="Call patient"
-                        className="clay-btn btn-sm"
-                      >
-                        <Icon name="phoneCall" className="h-4 w-4" />
-                        {callingPatientId === patient.id ? 'Calling...' : 'Call'}
-                      </button>
-                      <button
-                        onClick={() => navigate({ to: '/patients/$id', params: { id: String(patient.id) } })}
-                        className="clay-btn-ghost btn-sm"
-                      >
-                        View <Icon name="chevronRight" className="h-4 w-4" />
-                      </button>
-                      {callMessage?.patientId === patient.id && (
-                        <span className={`text-xs font-semibold ${callMessage.ok ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          {callMessage.text}
-                        </span>
-                      )}
-                    </div>
+            <tbody className="divide-y divide-[#eef2f5] text-[13.5px]">
+              {paged.items.length > 0 ? (
+                paged.items.map((p) => {
+                  const ini = `${p.first_name?.[0] || ''}${p.last_name?.[0] || ''}`
+                  const isThisCalling = isInitiating && callingPatientId === p.id
+                  return (
+                    <tr key={p.id} className="hover:bg-[#fafbfc] transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <span className="m-av font-bold">{ini}</span>
+                          <div>
+                            <button
+                              onClick={() => navigate({ to: '/patients/$id', params: { id: String(p.id) } })}
+                              className="font-bold text-[#14212e] hover:text-[#0b6f6a] text-left"
+                            >
+                              {p.first_name} {p.last_name}
+                            </button>
+                            <div className="text-xs text-[#56646f]">{p.phone_number}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-[#56646f] font-mono">{p.mrn}</td>
+                      <td className="px-4 py-3 text-xs capitalize text-[#14212e]">
+                        {p.preferred_language || 'English'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={p.status} />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => startCall(p.id)}
+                            disabled={isThisCalling}
+                            className="m-btn !min-h-[32px] !py-1 !px-2.5 !text-xs"
+                            title="Call Patient"
+                          >
+                            <Icon name="phoneCall" className="h-3.5 w-3.5" />
+                            {isThisCalling ? 'Calling...' : 'Call'}
+                          </button>
+                          <button
+                            onClick={() => navigate({ to: '/patients/$id', params: { id: String(p.id) } })}
+                            className="m-btn !min-h-[32px] !py-1 !px-3 !text-xs !bg-[#14212e] !border-[#14212e] !text-white hover:!bg-[#0f8f87] hover:!border-[#0f8f87]"
+                          >
+                            View
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
+              ) : (
+                <tr>
+                  <td colSpan={5} className="py-8">
+                    <EmptyState icon="users" text="No patients found matching your search." />
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
-          {filtered.length === 0 && <EmptyState icon="users" text="No patients found" />}
         </div>
-        <Pagination paged={paged} noun="patients" />
+
+        <Pagination
+          page={paged.page}
+          totalPages={paged.totalPages}
+          setPage={paged.setPage}
+          totalItems={paged.totalItems}
+        />
       </div>
     </div>
   )

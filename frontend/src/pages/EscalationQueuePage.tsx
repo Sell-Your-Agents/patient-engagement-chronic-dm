@@ -2,13 +2,9 @@ import { useEscalations, useUpdateEscalation } from '../hooks/useEscalations'
 import { usePatients } from '../hooks/usePatients'
 import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { Icon } from '../components/Icon'
 import {
   PageHeader,
-  StatCard,
   StatusBadge,
-  SeverityBadge,
-  Field,
   EmptyState,
   Loader,
   ErrorState,
@@ -17,19 +13,11 @@ import {
   Pagination,
 } from '../components/ui'
 
-const SEVERITY_BAR: Record<string, string> = {
-  urgent: 'bg-rose-500',
-  high: 'bg-orange-500',
-  medium: 'bg-amber-400',
-  low: 'bg-sky-400',
-}
-
 export function EscalationQueuePage() {
   const navigate = useNavigate()
   const { data: escalations, isLoading, error } = useEscalations()
   const { data: patients } = usePatients(0, 100)
   const { mutate: updateEscalation, isPending } = useUpdateEscalation()
-  const [selectedId, setSelectedId] = useState<number | null>(null)
   const [page, setPage] = useState(1)
 
   if (isLoading) return <Loader text="Loading escalations..." />
@@ -42,113 +30,111 @@ export function EscalationQueuePage() {
     return p ? `${p.first_name} ${p.last_name}` : `Patient #${id}`
   }
 
-  const selected = escalations?.find((e) => e.id === selectedId)
-  const openCases = escalations?.filter((e) => e.status === 'open') || []
+  const openCases = escalations?.filter((e) => e.status !== 'resolved') || []
   const urgentCases = openCases.filter((e) => e.severity === 'urgent')
-  const paged = paginate(openCases, page, setPage, 5)
+  const paged = paginate(escalations || [], page, setPage, 6)
 
   return (
-    <div>
-      <PageHeader title="Escalation Queue" subtitle="Patient cases flagged by the AI agent that need care team attention." />
+    <div className="flex flex-col gap-4">
+      <PageHeader
+        title="Escalations"
+        subtitle="Patient cases flagged by the AI agent that need care team attention."
+      />
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Open Cases" value={openCases.length} icon="alert" tint="coral" />
-        <StatCard label="Urgent" value={urgentCases.length} icon="activity" tint="rose" />
-        <StatCard label="Total" value={escalations?.length || 0} icon="shield" tint="sky" />
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+        <div className="m-card">
+          <div className="m-lbl">Open Cases</div>
+          <div className="mt-1.5 text-[28px] font-extrabold text-[#a11d27]">{openCases.length}</div>
+          <div className="mt-1 text-xs text-[#56646f]">Require action</div>
+        </div>
+        <div className="m-card">
+          <div className="m-lbl">Urgent Cases</div>
+          <div className="mt-1.5 text-[28px] font-extrabold text-[#a11d27]">{urgentCases.length}</div>
+          <div className="mt-1 text-xs text-[#56646f]">High priority triage</div>
+        </div>
+        <div className="m-card">
+          <div className="m-lbl">Total Logged</div>
+          <div className="mt-1.5 text-[28px] font-extrabold text-[#14212e]">{escalations?.length || 0}</div>
+          <div className="mt-1 text-xs text-[#56646f]">Historical cases</div>
+        </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-3">
-        {/* List */}
-        <div className="space-y-3 xl:col-span-2">
-          {paged.pageItems.map((escalation) => (
+      {/* Meridian List Layout */}
+      <div className="flex flex-col gap-3">
+        {paged.items.map((e) => {
+          const isUrgent = e.severity === 'urgent'
+          const isHigh = e.severity === 'high'
+          const sevCls = isUrgent ? 'm-pill-bad' : isHigh ? 'm-pill-warn' : 'm-pill-info'
+          const canAck = e.status === 'open'
+          const canRes = e.status !== 'resolved'
+
+          return (
             <div
-              key={escalation.id}
-              onClick={() => setSelectedId(escalation.id)}
-              className={`clay relative cursor-pointer overflow-hidden !rounded-[20px] p-4 pl-6 transition hover:-translate-y-0.5 ${
-                selectedId === escalation.id ? 'ring-2 ring-orange-400' : ''
-              }`}
+              key={e.id}
+              className="m-card flex flex-wrap items-center justify-between gap-3 transition hover:border-[#0f8f87]"
             >
-              <span className={`absolute inset-y-0 left-0 w-2 ${SEVERITY_BAR[escalation.severity] || 'bg-sky-400'}`} />
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="font-extrabold text-ink">{patientName(escalation.patient_id)}</p>
-                  <p className="mt-1 line-clamp-2 text-sm text-ink-soft">{escalation.reason}</p>
+              <span className={`m-pill uppercase font-bold text-xs ${sevCls}`}>{e.severity}</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[15px] font-extrabold text-[#14212e]">
+                  {patientName(e.patient_id)}
                 </div>
-                <SeverityBadge severity={escalation.severity} />
+                <div className="text-[13.5px] text-[#56646f]">{e.reason}</div>
+                <div className="mt-1 text-xs text-[#8fa1b3]">
+                  Escalation #{e.id} · raised in call #{e.call_log_id} · {formatDate(e.created_at)}
+                </div>
               </div>
-              <div className="mt-3 flex items-center gap-4 text-xs font-semibold text-ink-muted">
-                <span className="flex items-center gap-1">
-                  <Icon name="clock" className="h-3.5 w-3.5" /> Created {formatDate(escalation.created_at)}
-                </span>
-                <span>Call #{escalation.call_log_id}</span>
+              <StatusBadge status={e.status} />
+              <div className="flex items-center gap-2">
+                {canAck && (
+                  <button
+                    onClick={() => updateEscalation({ id: e.id, status: 'acknowledged' })}
+                    disabled={isPending}
+                    className="m-btn !min-h-[34px] !py-1 !px-3 !text-xs"
+                  >
+                    Acknowledge
+                  </button>
+                )}
+                {canRes && (
+                  <button
+                    onClick={() =>
+                      updateEscalation({
+                        id: e.id,
+                        status: 'resolved',
+                        resolution_notes: 'Resolved by care team',
+                      })
+                    }
+                    disabled={isPending}
+                    className="m-btn-primary !min-h-[34px] !py-1 !px-3 !text-xs"
+                  >
+                    Resolve
+                  </button>
+                )}
+                {e.patient_id && (
+                  <button
+                    onClick={() => navigate({ to: '/patients/$id', params: { id: String(e.patient_id) } })}
+                    className="m-btn !min-h-[34px] !py-1 !px-3 !text-xs !bg-[#14212e] !border-[#14212e] !text-white hover:!bg-[#0f8f87] hover:!border-[#0f8f87]"
+                  >
+                    View Patient
+                  </button>
+                )}
               </div>
             </div>
-          ))}
-          {openCases.length === 0 && (
-            <div className="clay">
-              <EmptyState icon="checkCircle" text="No open escalations" />
-            </div>
-          )}
-          {openCases.length > 0 && (
-            <div className="clay overflow-hidden">
-              <Pagination paged={paged} noun="cases" />
-            </div>
-          )}
-        </div>
+          )
+        })}
 
-        {/* Detail */}
-        <div className="clay h-fit p-5 xl:sticky xl:top-8">
-          {selected ? (
-            <div className="space-y-4">
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="card-title">Escalation #{selected.id}</h3>
-                <SeverityBadge severity={selected.severity} />
-              </div>
+        {paged.items.length === 0 && (
+          <div className="m-card">
+            <EmptyState icon="checkCircle" text="No escalations in queue." />
+          </div>
+        )}
 
-              <div className="clay-inset grid gap-3.5 rounded-[18px] p-4">
-                <Field label="Patient">{patientName(selected.patient_id)}</Field>
-                <Field label="Status">
-                  <StatusBadge status={selected.status} />
-                </Field>
-                <Field label="Reason">
-                  <span className="font-medium text-ink-soft">{selected.reason}</span>
-                </Field>
-              </div>
-
-              <div className="space-y-3">
-                <button
-                  onClick={() => updateEscalation({ id: selected.id, status: 'acknowledged' })}
-                  disabled={isPending}
-                  className="clay-btn-blue w-full"
-                >
-                  <Icon name="clock" className="h-4 w-4" /> Acknowledge
-                </button>
-                <button
-                  onClick={() =>
-                    updateEscalation({
-                      id: selected.id,
-                      status: 'resolved',
-                      resolution_notes: 'Resolved by care team',
-                    })
-                  }
-                  disabled={isPending}
-                  className="clay-btn-green w-full"
-                >
-                  <Icon name="checkCircle" className="h-4 w-4" /> Mark Resolved
-                </button>
-                <button
-                  onClick={() => navigate({ to: '/escalations/$id', params: { id: String(selected.id) } })}
-                  className="clay-btn-ghost w-full"
-                >
-                  Open Full Details <Icon name="chevronRight" className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          ) : (
-            <EmptyState icon="alert" text="Select an escalation to view details" />
-          )}
-        </div>
+        <Pagination
+          page={paged.page}
+          totalPages={paged.totalPages}
+          setPage={paged.setPage}
+          totalItems={paged.totalItems}
+        />
       </div>
     </div>
   )

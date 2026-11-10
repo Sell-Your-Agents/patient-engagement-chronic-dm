@@ -71,7 +71,7 @@ function IntervalField({
           max={max}
           value={value}
           onChange={(e) => onValueChange(e.target.value)}
-          className="clay-input !w-24"
+          className="m-card !py-1.5 !px-2.5 !w-24 border border-[#dbe3ea] dark:border-[#243447] text-xs font-semibold"
         />
         <select
           value={unit}
@@ -80,7 +80,7 @@ function IntervalField({
             onUnitChange(next)
             onValueChange(String(INTERVAL_LIMITS[next].presets[0]))
           }}
-          className="clay-input !w-32"
+          className="m-card !py-1.5 !px-2.5 !w-32 border border-[#dbe3ea] dark:border-[#243447] text-xs font-semibold"
         >
           <option value="days">Days</option>
           <option value="minutes">Minutes</option>
@@ -90,7 +90,7 @@ function IntervalField({
             key={d}
             type="button"
             onClick={() => onValueChange(String(d))}
-            className={amount === d ? 'clay-btn btn-sm' : 'clay-btn-ghost btn-sm'}
+            className={`m-tab !py-1 !px-2.5 !text-xs ${amount === d ? 'on font-bold' : ''}`}
           >
             {d}
             {short}
@@ -99,7 +99,7 @@ function IntervalField({
       </div>
       {!intervalValid(unit, amount) && <p className="mt-1 text-xs text-rose-600">Enter 1–{max} {unit}</p>}
       {unit === 'minutes' && (
-        <p className="mt-1 text-xs font-normal text-ink-soft">
+        <p className="mt-1 text-xs font-normal text-[#56646f] dark:text-slate-400">
           The agent calls every {intervalValid(unit, amount) ? amount : 'N'} minutes, at any hour (call time and
           calling hours don't apply). Mainly for testing.
         </p>
@@ -135,10 +135,18 @@ export function DiseasesPage() {
           <button
             key={d.id}
             onClick={() => setSelectedId(d.id)}
-            className={d.id === selected.id ? 'clay-btn btn-sm' : 'clay-btn-ghost btn-sm'}
+            className={`m-tab flex items-center gap-2 ${d.id === selected.id ? 'on font-bold' : ''}`}
           >
-            {d.display_name}
-            <span className="rounded-full bg-white/60 px-1.5 text-[11px] font-bold">{d.plans.length}</span>
+            <span>{d.display_name}</span>
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[11px] font-bold ${
+                d.id === selected.id
+                  ? 'bg-white/20 text-white'
+                  : 'bg-[#eef2f5] dark:bg-[#101a26] text-[#56646f] dark:text-slate-300'
+              }`}
+            >
+              {d.plans.length}
+            </span>
           </button>
         ))}
       </div>
@@ -192,24 +200,24 @@ function DiseaseDetail({ disease }: { disease: DiseaseOverview }) {
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <Panel title="About this disease">
-          <div className="space-y-4 px-5 pb-5">
-            <p className="text-sm text-ink-soft">{disease.description || 'No description available.'}</p>
+          <div className="space-y-4 px-1 pb-1">
+            <p className="text-sm text-[#56646f] dark:text-slate-300">{disease.description || 'No description available.'}</p>
             {p ? (
               <>
                 <div>
-                  <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-ink-muted">Medication classes</p>
+                  <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-[#8fa1b3] dark:text-slate-400">Medication classes</p>
                   <div className="flex flex-wrap gap-1.5">
                     {p.medication_classes.map((m) => (
-                      <span key={m} className="pill bg-sky-100 text-sky-700">{m}</span>
+                      <span key={m} className="m-pill m-pill-info font-medium">{m}</span>
                     ))}
                   </div>
                 </div>
                 {p.lab_reminder_defaults && Object.keys(p.lab_reminder_defaults).length > 0 && (
                   <div>
-                    <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-ink-muted">Lab reminders</p>
+                    <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-[#8fa1b3] dark:text-slate-400">Lab reminders</p>
                     <div className="flex flex-wrap gap-1.5">
                       {Object.entries(p.lab_reminder_defaults).map(([lab, days]) => (
-                        <span key={lab} className="pill bg-amber-100 text-amber-700">
+                        <span key={lab} className="m-pill m-pill-warn font-medium">
                           {lab.replace(/_/g, ' ')} · every {days} days
                         </span>
                       ))}
@@ -217,44 +225,44 @@ function DiseaseDetail({ disease }: { disease: DiseaseOverview }) {
                   </div>
                 )}
                 <div>
-                  <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-ink-muted">Escalation</p>
-                  <p className="text-sm text-ink">{p.escalation_instructions}</p>
+                  <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-[#8fa1b3] dark:text-slate-400">Escalation</p>
+                  <p className="text-sm font-semibold text-[#14212e] dark:text-white">{p.escalation_instructions}</p>
                 </div>
               </>
             ) : (
-              <p className="text-sm text-ink-muted">No active care protocol for this disease.</p>
+              <p className="text-sm text-[#8fa1b3] dark:text-slate-400">No active care protocol for this disease.</p>
             )}
           </div>
         </Panel>
 
         <Panel title="Red flags">
-          <div className="space-y-2 px-5 pb-5">
+          <div className="space-y-2 px-1 pb-1">
             {p?.red_flag_criteria.map((f) => (
-              <div key={f.id} className="clay-inset flex items-start justify-between gap-3 rounded-2xl p-3">
-                <p className="text-sm text-ink">{f.description}</p>
+              <div key={f.id} className="flex items-start justify-between gap-3 rounded-xl border border-[#dbe3ea] bg-[#fafbfc] p-3 dark:border-[#243447] dark:bg-[#101a26]">
+                <p className="text-sm font-semibold text-[#14212e] dark:text-white">{f.description}</p>
                 <SeverityBadge severity={f.severity} />
               </div>
             ))}
-            {!p?.red_flag_criteria.length && <p className="text-sm text-ink-muted">None defined.</p>}
+            {!p?.red_flag_criteria.length && <p className="text-sm text-[#8fa1b3] dark:text-slate-400">None defined.</p>}
           </div>
         </Panel>
 
         <Panel title="Check-in questions">
-          <ul className="space-y-2 px-5 pb-5">
+          <ul className="space-y-2 px-1 pb-1">
             {p?.assessment_questions.map((q) => (
-              <li key={q.id} className="flex items-start gap-2 text-sm text-ink">
-                <span className="pill mt-0.5 shrink-0 bg-slate-100 capitalize text-slate-700">{q.category}</span>
-                <span>{q.text}</span>
+              <li key={q.id} className="flex items-start gap-2.5 text-sm text-[#14212e] dark:text-white">
+                <span className="m-pill m-pill-mute mt-0.5 shrink-0 capitalize">{q.category}</span>
+                <span className="font-medium">{q.text}</span>
               </li>
             ))}
-            {!p?.assessment_questions.length && <li className="text-sm text-ink-muted">None defined.</li>}
+            {!p?.assessment_questions.length && <li className="text-sm text-[#8fa1b3] dark:text-slate-400">None defined.</li>}
           </ul>
         </Panel>
 
         <Panel title="Education points">
-          <ul className="list-disc space-y-1.5 px-5 pb-5 pl-9 text-sm text-ink">
-            {p?.education_talking_points.map((t) => <li key={t}>{t}</li>)}
-            {!p?.education_talking_points.length && <li className="list-none text-ink-muted">None defined.</li>}
+          <ul className="list-disc space-y-1.5 px-5 pb-1 text-sm text-[#14212e] dark:text-white">
+            {p?.education_talking_points.map((t) => <li key={t} className="font-medium">{t}</li>)}
+            {!p?.education_talking_points.length && <li className="list-none text-[#8fa1b3] dark:text-slate-400">None defined.</li>}
           </ul>
         </Panel>
       </div>
@@ -316,14 +324,14 @@ function EditProtocolModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-slate-900/25 backdrop-blur-sm" onClick={onClose} />
-      <div className="clay clay-scroll relative max-h-[90vh] w-full max-w-lg overflow-y-auto p-6">
+      <div className="absolute inset-0 bg-[#12202e]/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="m-card relative max-h-[90vh] w-full max-w-lg overflow-y-auto !p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-xl font-extrabold text-ink">Follow-up interval</h3>
-            <p className="mt-1 text-sm text-ink-soft">{disease.display_name}</p>
+            <h3 className="text-xl font-extrabold text-[#14212e] dark:text-white">Follow-up interval</h3>
+            <p className="mt-1 text-sm text-[#56646f] dark:text-slate-300">{disease.display_name}</p>
           </div>
-          <button onClick={onClose} className="clay-btn-ghost btn-icon" title="Close">
+          <button onClick={onClose} className="m-btn btn-icon !h-8 !w-8" title="Close">
             <Icon name="x" className="h-4 w-4" />
           </button>
         </div>
@@ -334,35 +342,35 @@ function EditProtocolModal({
           {unit === 'days' && (
           <Field label="Call time (clinic time)">
             <div className="flex items-center gap-2">
-              <input type="time" value={callTime} onChange={(e) => setCallTime(e.target.value)} className="clay-input !w-40" />
+              <input type="time" value={callTime} onChange={(e) => setCallTime(e.target.value)} className="m-card !py-2 !px-3 !w-40 border border-[#dbe3ea] dark:border-[#243447]" />
               {callTime && (
-                <button type="button" onClick={() => setCallTime('')} className="clay-btn-ghost btn-sm">
+                <button type="button" onClick={() => setCallTime('')} className="m-btn btn-sm">
                   Clear
                 </button>
               )}
             </div>
-            <p className="mt-1 text-xs font-normal text-ink-soft">
+            <p className="mt-1 text-xs font-normal text-[#56646f] dark:text-slate-400">
               {callTime
                 ? `Follow-up calls are placed at ${hhmmTo12h(callTime)}.`
                 : 'No fixed time: the next call keeps the time of day of the last call.'}
             </p>
-            <p className="mt-1 text-xs font-normal text-ink-soft">
+            <p className="mt-1 text-xs font-normal text-[#56646f] dark:text-slate-400">
               The agent places these calls automatically when a patient's follow-up is due (9 AM–8 PM). Unanswered calls
               are tried 3 times, an hour apart, then flagged for staff.
             </p>
           </Field>
           )}
 
-          <label className="flex cursor-pointer items-start gap-2.5 text-sm text-ink">
+          <label className="flex cursor-pointer items-start gap-2.5 text-sm text-[#14212e] dark:text-white">
             <input
               type="checkbox"
               checked={applyToPlans}
               onChange={(e) => setApplyToPlans(e.target.checked)}
-              className="mt-0.5 h-4 w-4 accent-orange-500"
+              className="mt-0.5 h-4 w-4 accent-[#0f8f87]"
             />
             <span>
               Apply to {activePlans} active patient plan{activePlans === 1 ? '' : 's'}
-              <span className="block text-xs text-ink-soft">
+              <span className="block text-xs text-[#56646f] dark:text-slate-400">
                 Updates their interval and reschedules the next call. Otherwise existing plans keep their own interval.
               </span>
             </span>
@@ -372,8 +380,8 @@ function EditProtocolModal({
         {error && <p className="mt-3 text-sm font-semibold text-rose-600">{error}</p>}
 
         <div className="mt-6 flex justify-end gap-3">
-          <button onClick={onClose} className="clay-btn-ghost">Cancel</button>
-          <button onClick={save} disabled={!valid || isPending} className="clay-btn">
+          <button onClick={onClose} className="m-btn">Cancel</button>
+          <button onClick={save} disabled={!valid || isPending} className="m-btn-primary">
             {isPending ? 'Saving...' : 'Save'}
           </button>
         </div>
@@ -389,75 +397,79 @@ function PlanSchedule({ plans }: { plans: DiseasePlan[] }) {
 
   return (
     <Panel title="Patient plans & schedule">
-      <table className="clay-table w-full">
-        <thead>
-          <tr>
-            <th>Patient</th>
-            <th className="col-lg">Severity</th>
-            <th>Plan duration</th>
-            <th>Next call day</th>
-            <th>Time</th>
-            <th className="col-lg">Last outreach</th>
-            <th>Status</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {plans.map((pl) => {
-            const due = fromUtc(pl.next_due_date)
-            const isOverdue = pl.status === 'active' && due.getTime() < now
-            return (
-              <tr
-                key={pl.plan_id}
-                onClick={() => navigate({ to: '/patients/$id', params: { id: String(pl.patient_id) } })}
-                className="cursor-pointer"
-              >
-                <td>
-                  <p className="font-bold text-ink">{pl.patient_name}</p>
-                  {pl.assigned_physician_name && <p className="text-xs text-ink-soft">{pl.assigned_physician_name}</p>}
-                </td>
-                <td className="col-lg capitalize">{pl.severity || '—'}</td>
-                <td>
-                  <p className="font-semibold text-ink">
-                    {intervalLabel(pl.followup_interval_days, pl.followup_interval_minutes)}
-                  </p>
-                  <p className="text-xs text-ink-soft">
-                    {pl.followup_interval_minutes
-                      ? `${pl.followup_interval_minutes} minutes`
-                      : `${pl.followup_interval_days} days`}
-                  </p>
-                </td>
-                <td>
-                  <p className="font-semibold text-ink">{due.toLocaleDateString('en-US', { weekday: 'long' })}</p>
-                  <p className={`text-xs ${isOverdue ? 'font-bold text-rose-600' : 'text-ink-soft'}`}>
-                    {due.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    {isOverdue && ' · overdue'}
-                  </p>
-                </td>
-                <td className="whitespace-nowrap font-semibold text-ink">
-                  <span className="inline-flex items-center gap-1.5">
-                    <Icon name="clock" className="h-3.5 w-3.5 text-ink-muted" />
-                    {due.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                  </span>
-                </td>
-                <td className="col-lg text-ink-soft">{formatUtcDateTime(pl.last_outreach_at)}</td>
-                <td><StatusBadge status={pl.status} /></td>
-                <td>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setEditing(pl)
-                    }}
-                    className="clay-btn-ghost btn-sm"
-                  >
-                    <Icon name="edit" className="h-3.5 w-3.5" /> Edit
-                  </button>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr className="border-b border-[#dbe3ea] bg-[#fafbfc] dark:border-[#243447] dark:bg-[#101a26] text-[11px] font-extrabold uppercase text-[#56646f] dark:text-slate-400">
+              <th className="px-3.5 py-2.5">Patient</th>
+              <th className="px-3.5 py-2.5 col-lg">Severity</th>
+              <th className="px-3.5 py-2.5">Plan duration</th>
+              <th className="px-3.5 py-2.5">Next call day</th>
+              <th className="px-3.5 py-2.5">Time</th>
+              <th className="px-3.5 py-2.5 col-lg">Last outreach</th>
+              <th className="px-3.5 py-2.5">Status</th>
+              <th className="px-3.5 py-2.5">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#eef2f5] dark:divide-[#1e2f42]">
+            {plans.map((pl) => {
+              const due = fromUtc(pl.next_due_date)
+              const isOverdue = pl.status === 'active' && due.getTime() < now
+              return (
+                <tr
+                  key={pl.plan_id}
+                  onClick={() => navigate({ to: '/patients/$id', params: { id: String(pl.patient_id) } })}
+                  className="cursor-pointer hover:bg-[#fafbfc] dark:hover:bg-[#192738] transition"
+                >
+                  <td className="px-3.5 py-2.5">
+                    <p className="font-bold text-[#14212e] dark:text-white">{pl.patient_name}</p>
+                    {pl.assigned_physician_name && (
+                      <p className="text-xs text-[#56646f] dark:text-slate-400">{pl.assigned_physician_name}</p>
+                    )}
+                  </td>
+                  <td className="px-3.5 py-2.5 col-lg capitalize font-medium text-[#14212e] dark:text-white">{pl.severity || '—'}</td>
+                  <td className="px-3.5 py-2.5">
+                    <p className="font-semibold text-[#14212e] dark:text-white">
+                      {intervalLabel(pl.followup_interval_days, pl.followup_interval_minutes)}
+                    </p>
+                    <p className="text-xs text-[#56646f] dark:text-slate-400">
+                      {pl.followup_interval_minutes
+                        ? `${pl.followup_interval_minutes} minutes`
+                        : `${pl.followup_interval_days} days`}
+                    </p>
+                  </td>
+                  <td className="px-3.5 py-2.5">
+                    <p className="font-semibold text-[#14212e] dark:text-white">{due.toLocaleDateString('en-US', { weekday: 'long' })}</p>
+                    <p className={`text-xs ${isOverdue ? 'font-bold text-rose-500' : 'text-[#56646f] dark:text-slate-400'}`}>
+                      {due.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {isOverdue && ' · overdue'}
+                    </p>
+                  </td>
+                  <td className="px-3.5 py-2.5 whitespace-nowrap font-semibold text-[#14212e] dark:text-white">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Icon name="clock" className="h-3.5 w-3.5 text-[#8fa1b3]" />
+                      {due.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                    </span>
+                  </td>
+                  <td className="px-3.5 py-2.5 col-lg text-[#56646f] dark:text-slate-400">{formatUtcDateTime(pl.last_outreach_at)}</td>
+                  <td className="px-3.5 py-2.5"><StatusBadge status={pl.status} /></td>
+                  <td className="px-3.5 py-2.5">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setEditing(pl)
+                      }}
+                      className="m-btn btn-sm !py-1 text-xs"
+                    >
+                      <Icon name="edit" className="h-3.5 w-3.5" /> Edit
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
       {plans.length === 0 && <EmptyState icon="calendar" text="No patients on a plan for this disease" />}
       {editing && <EditFollowUpModal plan={editing} onClose={() => setEditing(null)} />}
     </Panel>
@@ -523,14 +535,14 @@ function EditFollowUpModal({ plan, onClose }: { plan: DiseasePlan; onClose: () =
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-slate-900/25 backdrop-blur-sm" onClick={onClose} />
-      <div className="clay clay-scroll relative max-h-[90vh] w-full max-w-lg overflow-y-auto p-6">
+      <div className="absolute inset-0 bg-[#12202e]/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="m-card relative max-h-[90vh] w-full max-w-lg overflow-y-auto !p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-xl font-extrabold text-ink">Edit follow-up</h3>
-            <p className="mt-1 text-sm text-ink-soft">{plan.patient_name}</p>
+            <h3 className="text-xl font-extrabold text-[#14212e] dark:text-white">Edit follow-up</h3>
+            <p className="mt-1 text-sm text-[#56646f] dark:text-slate-300">{plan.patient_name}</p>
           </div>
-          <button onClick={onClose} className="clay-btn-ghost btn-icon" title="Close">
+          <button onClick={onClose} className="m-btn btn-icon !h-8 !w-8" title="Close">
             <Icon name="x" className="h-4 w-4" />
           </button>
         </div>
@@ -540,46 +552,46 @@ function EditFollowUpModal({ plan, onClose }: { plan: DiseasePlan; onClose: () =
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Next call date">
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="clay-input" />
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="m-card !py-2 !px-3 border border-[#dbe3ea] dark:border-[#243447]" />
             </Field>
             <Field label="Time">
-              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="clay-input" />
+              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="m-card !py-2 !px-3 border border-[#dbe3ea] dark:border-[#243447]" />
             </Field>
           </div>
-          <div className="flex items-center justify-between gap-3 text-xs text-ink-soft">
+          <div className="flex items-center justify-between gap-3 text-xs text-[#56646f] dark:text-slate-400">
             <span>
               {valid
                 ? nextDue.toLocaleString('en-US', { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
                 : '—'}
             </span>
-            <button type="button" onClick={fromNow} disabled={!amountValid} className="clay-btn-ghost btn-sm">
+            <button type="button" onClick={fromNow} disabled={!amountValid} className="m-btn btn-sm">
               {unit === 'minutes' ? 'Now' : 'Today'} + {amountValid ? amount : '?'} {unit === 'minutes' ? 'min' : 'days'}
             </button>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Status">
-              <select value={status} onChange={(e) => setStatus(e.target.value)} className="clay-input">
+              <select value={status} onChange={(e) => setStatus(e.target.value)} className="m-card !py-2 !px-3 border border-[#dbe3ea] dark:border-[#243447]">
                 <option value="active">Active</option>
                 <option value="paused">Paused</option>
                 <option value="completed">Completed</option>
               </select>
             </Field>
             <Field label="Physician">
-              <input value={physician} onChange={(e) => setPhysician(e.target.value)} className="clay-input" placeholder="Optional" />
+              <input value={physician} onChange={(e) => setPhysician(e.target.value)} className="m-card !py-2 !px-3 border border-[#dbe3ea] dark:border-[#243447]" placeholder="Optional" />
             </Field>
           </div>
 
           <Field label="Notes">
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="clay-input" />
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="m-card !py-2 !px-3 w-full border border-[#dbe3ea] dark:border-[#243447]" />
           </Field>
         </div>
 
         {error && <p className="mt-3 text-sm font-semibold text-rose-600">{error}</p>}
 
         <div className="mt-6 flex justify-end gap-3">
-          <button onClick={onClose} className="clay-btn-ghost">Cancel</button>
-          <button onClick={save} disabled={!valid || isPending} className="clay-btn">
+          <button onClick={onClose} className="m-btn">Cancel</button>
+          <button onClick={save} disabled={!valid || isPending} className="m-btn-primary">
             {isPending ? 'Saving...' : 'Save'}
           </button>
         </div>

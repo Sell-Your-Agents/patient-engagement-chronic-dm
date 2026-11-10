@@ -9,17 +9,17 @@
 */
 
 :root {
-  --ink: #1e2633;
-  --ink-soft: #5b6576;
-  --ink-muted: #94a0b2;
-  --surface: #f8fafc;
-  --surface-2: #fdfeff;
-  --page: #eaeff5;
-  --brand-1: #ffa94d;
-  --brand-2: #ff7a1a;
-  --brand-3: #f25c05;
-  --shadow-dark: rgba(150, 166, 190, 0.38);
-  --shadow-light: rgba(255, 255, 255, 0.95);
+  --ink: #14212e;
+  --ink-soft: #56646f;
+  --ink-muted: #8fa1b3;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --page: #eef2f5;
+  --brand-1: #0f8f87;
+  --brand-2: #0b6f6a;
+  --brand-3: #074f4b;
+  --shadow-dark: rgba(20, 33, 46, 0.08);
+  --shadow-light: rgba(255, 255, 255, 1);
 }
 
 * {
@@ -29,9 +29,9 @@
 }
 
 body {
-  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  color: var(--ink);
-  background: var(--page);
+  font-family: 'Manrope', 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #14212e;
+  background: #eef2f5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -315,7 +315,346 @@ code {
   .col-md, .col-lg, .col-xl, .col-2xl { display: table-cell !important; }
 }
 
-/* ---------- Sidebar ---------- */
+/* ---------- Meridian Design System Tokens & Utility Classes ---------- */
+.m-card {
+  background: #ffffff;
+  border-radius: 14px;
+  border: 1px solid #dbe3ea;
+  padding: 18px;
+  min-width: 0;
+  box-shadow: 0 1px 3px rgba(20, 33, 46, 0.04);
+}
+
+.m-lbl {
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #56646f;
+}
+
+.m-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.m-pill-ok { background: #dff3ea; color: #0f6339; }
+.m-pill-warn { background: #fcefd6; color: #7f4c00; }
+.m-pill-bad { background: #fde3e3; color: #a11d27; }
+.m-pill-info { background: #e2edfb; color: #1b4b94; }
+.m-pill-mute { background: #eceff2; color: #46535f; }
+
+.m-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #cdd7df;
+  background: #ffffff;
+  color: #14212e;
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-weight: 700;
+  font-size: 13px;
+  min-height: 38px;
+  transition: all 0.15s ease;
+}
+.m-btn:hover:not(:disabled) {
+  border-color: #0f8f87;
+  color: #0b6f6a;
+}
+.m-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.m-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  background: #0f8f87;
+  color: #ffffff;
+  border-radius: 9px;
+  padding: 9px 16px;
+  font-weight: 700;
+  font-size: 13px;
+  min-height: 38px;
+  transition: all 0.15s ease;
+}
+.m-btn-primary:hover:not(:disabled) {
+  background: #0b6f6a;
+}
+.m-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.m-tab {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #cdd7df;
+  background: #ffffff;
+  color: #33414d;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-weight: 700;
+  font-size: 13px;
+  min-height: 36px;
+  transition: all 0.15s ease;
+}
+.m-tab:hover {
+  border-color: #0f8f87;
+  color: #0b6f6a;
+}
+.m-tab.on,
+.m-tab-active {
+  background: #14212e;
+  border-color: #14212e;
+  color: #ffffff;
+}
+
+.m-av {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #d6efed;
+  color: #0b5f5b;
+  font-weight: 800;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.m-navb {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #b9c6d4;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  min-height: 44px;
+  transition: all 0.15s ease;
+}
+.m-navb:hover {
+  background: #1c2d3e;
+  color: #ffffff;
+}
+.m-navb.on,
+.m-navb-active {
+  background: #0f8f87;
+  color: #ffffff;
+}
+
+/* ---------- Dark Mode Overrides for Meridian UI ---------- */
+html.dark {
+  --ink: #ffffff;
+  --ink-soft: #cbd5e1;
+  --ink-muted: #94a3b8;
+  --surface: #14202d;
+  --surface-2: #162434;
+  --page: #0b131e;
+}
+
+html.dark,
+html.dark body {
+  background: #0b131e;
+  color: #f1f5f9;
+}
+
+.dark .text-ink { color: #ffffff !important; }
+.dark .text-ink-soft { color: #cbd5e1 !important; }
+.dark .text-ink-muted { color: #94a3b8 !important; }
+
+.dark .clay {
+  background: #14202d !important;
+  color: #f1f5f9 !important;
+  border-color: #243447 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+}
+
+.dark .clay-inset {
+  background: #101a26 !important;
+  color: #f1f5f9 !important;
+  box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.4) !important;
+  border: 1px solid #243447 !important;
+}
+
+.dark .clay-table th {
+  color: #94a3b8 !important;
+  background: #101a26 !important;
+  border-bottom: 1px solid #243447 !important;
+}
+
+.dark .clay-table td {
+  color: #f1f5f9 !important;
+  border-bottom: 1px solid #1e2f42 !important;
+}
+
+.dark .clay-btn-ghost {
+  color: #f1f5f9 !important;
+  background: #1a2b3c !important;
+  border: 1px solid #243447 !important;
+}
+.dark .clay-btn-ghost:hover:not(:disabled) {
+  border-color: #0f8f87 !important;
+  color: #5eead4 !important;
+}
+
+.dark .m-card {
+  background: #14202d;
+  border-color: #243447;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.dark .m-lbl {
+  color: #8fa1b3;
+}
+
+.dark .m-btn {
+  background: #1a2b3c;
+  border-color: #2c3e52;
+  color: #f1f5f9;
+}
+.dark .m-btn:hover:not(:disabled) {
+  border-color: #0f8f87;
+  color: #5eead4;
+}
+
+.dark .m-tab {
+  background: #1a2b3c;
+  border-color: #2c3e52;
+  color: #cbd5e1;
+}
+.dark .m-tab.on,
+.dark .m-tab-active {
+  background: #0f8f87;
+  border-color: #0f8f87;
+  color: #ffffff;
+}
+
+.dark .m-av {
+  background: #163937;
+  color: #5eead4;
+}
+
+.dark .m-pill-ok { background: #103b29; color: #4ade80; }
+.dark .m-pill-warn { background: #382a0d; color: #fbbf24; }
+.dark .m-pill-bad { background: #3d1417; color: #f87171; }
+.dark .m-pill-info { background: #142c4c; color: #60a5fa; }
+.dark .m-pill-mute { background: #1e2b3a; color: #94a3b8; }
+
+.dark .text-\[\#14212e\] { color: #f1f5f9 !important; }
+.dark .text-\[\#56646f\] { color: #94a3b8 !important; }
+.dark .text-\[\#8fa1b3\] { color: #64748b !important; }
+.dark .border-\[\#dbe3ea\] { border-color: #243447 !important; }
+.dark .border-\[\#cdd7df\] { border-color: #243447 !important; }
+.dark .border-\[\#eef2f5\] { border-color: #1e2f42 !important; }
+.dark .bg-\[\#eef2f5\] { background-color: #0b131e !important; }
+.dark .bg-\[\#fafbfc\] { background-color: #111c29 !important; }
+.dark .bg-\[\#f4f7f9\] { background-color: #162434 !important; }
+.dark .bg-white { background-color: #14202d !important; }
+.dark .divide-\[\#eef2f5\] > :not([hidden]) ~ :not([hidden]) { border-color: #1e2f42 !important; }
+.dark tr:hover { background-color: #192738 !important; }
+
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #101a26 !important;
+  border-color: #243447 !important;
+  color: #f1f5f9 !important;
+}
+
+/* ---------- Sidebar (Meridian Dark Theme) ---------- */
+.meridian-sidebar {
+  background: linear-gradient(180deg, #0d1527 0%, #080d19 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    14px 14px 36px rgba(10, 16, 30, 0.45),
+    inset 1px 1px 2px rgba(255, 255, 255, 0.08),
+    inset -1px -2px 4px rgba(0, 0, 0, 0.5);
+  border-radius: 24px;
+}
+
+.meridian-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  height: 2.45rem;
+  padding: 0 0.85rem;
+  border-radius: 13px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #94a3b8;
+  transition: all 0.15s ease;
+}
+.meridian-nav-item:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.07);
+}
+.meridian-nav-item-active,
+.meridian-nav-item-active:hover {
+  color: #fff;
+  background: linear-gradient(135deg, var(--brand-1) 0%, var(--brand-2) 55%, var(--brand-3) 100%);
+  box-shadow:
+    0 4px 16px rgba(242, 92, 5, 0.38),
+    inset 1px 1px 2px rgba(255, 255, 255, 0.45),
+    inset -1px -2px 4px rgba(150, 50, 0, 0.25);
+}
+
+.meridian-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+  transition: all 0.15s ease;
+}
+.meridian-btn-icon:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.meridian-logout-btn {
+  display: flex;
+  height: 2.5rem;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 14px;
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  background: rgba(244, 63, 94, 0.08);
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #fda4af;
+  transition: all 0.15s ease;
+}
+.meridian-logout-btn:hover {
+  background: rgba(244, 63, 94, 0.18);
+  color: #fff;
+  border-color: rgba(244, 63, 94, 0.45);
+  box-shadow: 0 4px 14px rgba(244, 63, 94, 0.25);
+}
+
 .nav-item {
   display: flex;
   align-items: center;

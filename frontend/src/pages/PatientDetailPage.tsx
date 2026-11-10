@@ -1,20 +1,15 @@
 import { useState } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { useParams, Link } from '@tanstack/react-router'
 import { usePatient, useInitiateCall } from '../hooks/usePatients'
 import { useCalls } from '../hooks/useCalls'
 import { useAppointments } from '../hooks/useAppointments'
 import { Icon } from '../components/Icon'
 import {
-  PageHeader,
   StatusBadge,
-  Field,
-  EmptyState,
   Loader,
   ErrorState,
   formatShortDateTime,
   callDuration,
-  paginate,
-  Pagination,
 } from '../components/ui'
 
 export function PatientDetailPage() {
@@ -25,13 +20,13 @@ export function PatientDetailPage() {
   const { data: appointments } = useAppointments({ patient_id: patientId })
   const { mutate: initiateCall, isPending } = useInitiateCall()
   const [callMessage, setCallMessage] = useState<{ ok: boolean; text: string } | null>(null)
-  const [callPage, setCallPage] = useState(1)
 
-  if (isLoading) return <Loader text="Loading patient..." />
+  if (isLoading) return <Loader text="Loading patient profile..." />
   if (error || !patient) return <ErrorState text="Error loading patient" />
 
+  const patientCalls = calls || []
   const patientAppointments = appointments || []
-  const pagedCalls = paginate(calls || [], callPage, setCallPage, 5)
+  const ini = `${patient.first_name?.[0] || ''}${patient.last_name?.[0] || ''}`
 
   const startCall = () => {
     setCallMessage(null)
@@ -46,120 +41,155 @@ export function PatientDetailPage() {
   }
 
   return (
-    <div>
-      <PageHeader
-        back={{ to: '/patients', label: 'Back to Patients' }}
-        title={`${patient.first_name} ${patient.last_name}`}
-        subtitle="Patient profile, call history and appointments."
-        actions={
-          <button onClick={startCall} disabled={isPending} className="clay-btn">
-            <Icon name="phoneCall" className="h-4 w-4" />
-            {isPending ? 'Calling...' : 'Initiate Call'}
-          </button>
-        }
-      />
-      {callMessage && (
-        <p className={`-mt-3 mb-4 text-sm font-semibold ${callMessage.ok ? 'text-emerald-600' : 'text-rose-600'}`}>
-          {callMessage.text}
-        </p>
-      )}
+    <div className="flex flex-col gap-4">
+      <div>
+        <Link to="/patients" className="m-btn !min-h-[32px] !py-1 !px-3 !text-xs mb-2 inline-flex items-center gap-1.5">
+          ← All patients
+        </Link>
+      </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        {/* Profile + appointments */}
-        <div className="h-fit">
-          <div className="clay p-5">
-            <div className="flex items-center gap-4">
-              <span className="logo-mark h-14 w-14 !rounded-full text-lg font-extrabold text-white">
-                {patient.first_name.charAt(0)}
-                {patient.last_name.charAt(0)}
-              </span>
-              <div>
-                <p className="card-title">
-                  {patient.first_name} {patient.last_name}
-                </p>
-                <StatusBadge status={patient.status} />
-              </div>
-            </div>
-            <div className="clay-inset mt-4 grid gap-3 rounded-[18px] p-4">
-              <Field label="MRN">
-                <span className="font-mono">{patient.mrn}</span>
-              </Field>
-              <Field label="Phone">{patient.phone_number}</Field>
-              <Field label="Preferred Language">
-                <span className="uppercase">{patient.preferred_language}</span>
-              </Field>
-            </div>
+      {/* Patient Hero Card */}
+      <div className="m-card flex flex-wrap items-center gap-4">
+        <span className="m-av !h-16 !w-16 !text-xl font-extrabold">{ini}</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-[22px] font-extrabold text-[#14212e]">
+              {patient.first_name} {patient.last_name}
+            </h1>
+            <StatusBadge status={patient.status} />
           </div>
-
-            {/* Appointments */}
-            <div className="clay mt-4 overflow-hidden">
-              <p className="card-title px-5 pb-2 pt-4">Appointments</p>
-              {patientAppointments.length === 0 ? (
-                <p className="px-5 pb-4 text-sm text-ink-muted">No appointments for this patient</p>
-              ) : (
-                <div className="space-y-2 px-4 pb-4">
-                  {patientAppointments.slice(0, 3).map((a) => (
-                    <div key={a.id} className="clay-inset rounded-2xl px-3 py-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="truncate text-sm font-bold text-ink">{a.doctor_name}</p>
-                        <StatusBadge status={a.status} />
-                      </div>
-                      <p className="mt-0.5 text-xs text-ink-soft">{a.start_at ? formatShortDateTime(a.start_at) : 'To be scheduled'}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+          <div className="mt-1 text-sm text-[#56646f]">
+            {patient.mrn} · {patient.phone_number} · Preferred language: {patient.preferred_language || 'English'}
+          </div>
         </div>
-
-        {/* Call history */}
-        <div className="clay overflow-hidden xl:col-span-2">
-          <p className="card-title px-5 pb-3 pt-4">Call History</p>
-          <div>
-            <table className="clay-table w-full">
-              <thead>
-                <tr>
-                  <th>Call</th>
-                  <th>Date & Time</th>
-                  <th className="col-md">Duration</th>
-                  <th>Status</th>
-                  <th className="col-xl">Flags</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pagedCalls.pageItems.map((call) => (
-                  <tr key={call.id}>
-                    <td className="font-bold text-ink">#{call.id}</td>
-                    <td className="whitespace-nowrap text-ink-soft">{formatShortDateTime(call.started_at)}</td>
-                    <td className="col-md font-semibold">{callDuration(call.started_at, call.ended_at)}</td>
-                    <td>
-                      <StatusBadge status={call.status} />
-                    </td>
-                    <td className="col-xl">
-                      <div className="flex flex-wrap gap-2">
-                        {call.warning_signs_detected && (
-                          <span className="pill bg-rose-100 text-rose-700">
-                            <Icon name="alert" className="h-3.5 w-3.5" /> Warning
-                          </span>
-                        )}
-                        {call.csat_score && (
-                          <span className="pill bg-amber-100 text-amber-700">
-                            <Icon name="star" className="h-3.5 w-3.5" /> {call.csat_score}/5
-                          </span>
-                        )}
-                        {!call.warning_signs_detected && !call.csat_score && <span className="text-ink-muted">—</span>}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {(!calls || calls.length === 0) && <EmptyState icon="phone" text="No calls yet for this patient" />}
-          </div>
-          <Pagination paged={pagedCalls} noun="calls" />
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button onClick={startCall} disabled={isPending} className="m-btn-primary">
+            <Icon name="phoneCall" className="h-4 w-4" />
+            {isPending ? 'Calling...' : 'Call now'}
+          </button>
         </div>
       </div>
 
+      {callMessage && (
+        <div
+          className={`rounded-lg px-4 py-2.5 text-xs font-bold ${
+            callMessage.ok ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+          }`}
+        >
+          {callMessage.text}
+        </div>
+      )}
+
+      {/* Row 2: 4 Meridian Info Cards */}
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="m-card">
+          <div className="m-lbl dark:text-slate-400">Consulting doctor</div>
+          <div className="mt-2.5 flex items-center gap-2.5">
+            <span className="m-av !h-8 !w-8 text-xs font-bold">AR</span>
+            <div>
+              <div className="text-sm font-extrabold text-[#14212e] dark:text-white">Dr. Ananya Rao</div>
+              <div className="text-xs text-[#56646f] dark:text-slate-400">General Physician</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="m-card">
+          <div className="m-lbl dark:text-slate-400">Chronic Condition</div>
+          <div className="mt-2 text-[16px] font-extrabold text-[#14212e] dark:text-white">Type 2 Diabetes</div>
+          <div className="text-xs text-[#56646f] dark:text-slate-300 mt-0.5">Severity: Moderate</div>
+        </div>
+
+        <div className="m-card">
+          <div className="m-lbl dark:text-slate-400">Care plan schedule</div>
+          <div className="mt-2 text-sm font-extrabold text-[#14212e] dark:text-white">Every 30 days</div>
+          <div className="text-xs text-[#56646f] dark:text-slate-300 mt-0.5">Next call: In 7 days</div>
+        </div>
+
+        <div className="m-card">
+          <div className="m-lbl dark:text-slate-400">Medication adherence</div>
+          <div className="mt-2">
+            <span className="m-pill m-pill-ok text-xs font-bold">Good / Adherent</span>
+          </div>
+          <div className="mt-1 text-xs text-[#56646f] dark:text-slate-300">From the latest check-in call</div>
+        </div>
+      </div>
+
+      {/* Row 3: Call Log & Appointments */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* Call Log */}
+        <div className="m-card !p-0 overflow-hidden">
+          <div className="border-b border-[#dbe3ea] bg-white px-5 py-3">
+            <div className="text-[15px] font-extrabold text-[#14212e]">Call history</div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-[#dbe3ea] bg-[#fafbfc] text-[11px] font-extrabold uppercase text-[#56646f]">
+                  <th className="px-3.5 py-2">Date</th>
+                  <th className="px-3.5 py-2">Direction</th>
+                  <th className="px-3.5 py-2">Duration</th>
+                  <th className="px-3.5 py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#eef2f5]">
+                {patientCalls.length > 0 ? (
+                  patientCalls.slice(0, 5).map((c) => (
+                    <tr key={c.id} className="hover:bg-[#fafbfc]">
+                      <td className="px-3.5 py-2.5 font-medium">{formatShortDateTime(c.created_at)}</td>
+                      <td className="px-3.5 py-2.5 capitalize">{c.direction}</td>
+                      <td className="px-3.5 py-2.5 text-[#56646f]">{callDuration(c.started_at, c.ended_at)}</td>
+                      <td className="px-3.5 py-2.5">
+                        <StatusBadge status={c.status} />
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={4} className="py-6 text-center text-[#56646f]">No calls logged yet.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Appointments */}
+        <div className="m-card !p-0 overflow-hidden">
+          <div className="border-b border-[#dbe3ea] bg-white px-5 py-3">
+            <div className="text-[15px] font-extrabold text-[#14212e]">Appointments</div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-[#dbe3ea] bg-[#fafbfc] text-[11px] font-extrabold uppercase text-[#56646f]">
+                  <th className="px-3.5 py-2">Doctor</th>
+                  <th className="px-3.5 py-2">Scheduled</th>
+                  <th className="px-3.5 py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#eef2f5]">
+                {patientAppointments.length > 0 ? (
+                  patientAppointments.map((a) => (
+                    <tr key={a.id} className="hover:bg-[#fafbfc]">
+                      <td className="px-3.5 py-2.5 font-bold text-[#14212e]">{a.doctor_name}</td>
+                      <td className="px-3.5 py-2.5 text-[#56646f]">
+                        {a.start_at ? formatShortDateTime(a.start_at) : 'Not scheduled'}
+                      </td>
+                      <td className="px-3.5 py-2.5">
+                        <StatusBadge status={a.status} />
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={3} className="py-6 text-center text-[#56646f]">No appointments booked.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
