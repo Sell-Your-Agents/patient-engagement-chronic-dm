@@ -33,7 +33,7 @@ export function useAppointments(params: AppointmentParams = {}) {
   return useQuery({
     queryKey: ['appointments', params],
     queryFn: async () => (await apiClient.listAppointments(params)) as Appointment[],
-    refetchInterval: 10000,
+    refetchInterval: 30000,
   })
 }
 

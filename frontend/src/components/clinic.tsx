@@ -1,4 +1,3 @@
-import { Icon } from './Icon'
 import type { Appointment } from '../hooks/useAppointments'
 import { formatDateTime, formatTime } from './ui'
 
@@ -32,35 +31,35 @@ export function initials(name: string) {
 }
 
 const URGENCY_STYLES: Record<string, string> = {
-  emergency: 'bg-rose-100 text-rose-700',
-  urgent: 'bg-orange-100 text-orange-700',
-  soon: 'bg-amber-100 text-amber-700',
-  routine: 'bg-sky-100 text-sky-700',
+  emergency: 'bad',
+  urgent: 'warn',
+  soon: 'warn',
+  routine: 'info',
 }
 
 export function UrgencyBadge({ urgency }: { urgency: string | null }) {
   if (!urgency) return <span className="text-ink-muted">—</span>
-  return <span className={`pill capitalize ${URGENCY_STYLES[urgency] || 'bg-slate-100 text-slate-700'}`}>{urgency}</span>
+  return <span className={`pill capitalize ${URGENCY_STYLES[urgency] || 'mute'}`}>{urgency}</span>
 }
 
 const OUTCOME_LABELS: Record<string, { label: string; cls: string }> = {
-  booked: { label: 'Booked', cls: 'bg-emerald-100 text-emerald-700' },
-  appointment_requested: { label: 'Visit requested', cls: 'bg-violet-100 text-violet-700' },
-  check_in_completed: { label: 'Check-in done', cls: 'bg-emerald-100 text-emerald-700' },
-  check_in_partial: { label: 'Check-in partly done', cls: 'bg-amber-100 text-amber-700' },
-  not_reached: { label: 'Not reached', cls: 'bg-amber-100 text-amber-700' },
-  language_support_needed: { label: 'Needs other language', cls: 'bg-violet-100 text-violet-700' },
-  completed: { label: 'Completed', cls: 'bg-emerald-100 text-emerald-700' },
-  declined: { label: 'Declined', cls: 'bg-slate-200 text-slate-600' },
-  info_only: { label: 'Info only', cls: 'bg-sky-100 text-sky-700' },
-  call_later: { label: 'Call later', cls: 'bg-amber-100 text-amber-700' },
-  wrong_number: { label: 'Wrong number', cls: 'bg-rose-100 text-rose-700' },
-  no_conversation: { label: 'No conversation', cls: 'bg-slate-200 text-slate-600' },
+  booked: { label: 'Booked', cls: 'ok' },
+  appointment_requested: { label: 'Visit requested', cls: 'violet' },
+  check_in_completed: { label: 'Check-in done', cls: 'ok' },
+  check_in_partial: { label: 'Check-in partly done', cls: 'warn' },
+  not_reached: { label: 'Not reached', cls: 'warn' },
+  language_support_needed: { label: 'Needs other language', cls: 'violet' },
+  completed: { label: 'Completed', cls: 'ok' },
+  declined: { label: 'Declined', cls: 'mute' },
+  info_only: { label: 'Info only', cls: 'info' },
+  call_later: { label: 'Call later', cls: 'warn' },
+  wrong_number: { label: 'Wrong number', cls: 'bad' },
+  no_conversation: { label: 'No conversation', cls: 'mute' },
 }
 
 export function OutcomeBadge({ outcome }: { outcome: string | null }) {
   if (!outcome) return <span className="text-ink-muted">—</span>
-  const o = OUTCOME_LABELS[outcome] || { label: outcome, cls: 'bg-slate-100 text-slate-700' }
+  const o = OUTCOME_LABELS[outcome] || { label: outcome, cls: 'mute' }
   return <span className={`pill ${o.cls}`}>{o.label}</span>
 }
 
@@ -72,39 +71,21 @@ export function TranscriptView({ transcript, agentName }: { transcript: string; 
     .filter(Boolean)
     .map((line) => {
       const match = line.match(/^(ASSISTANT|USER):\s*(.*)$/)
-      const role = match?.[1] === 'USER' ? 'user' : 'assistant'
-      const raw = match ? match[2] : line
+      const role = match?.[1] === 'USER' ? 'u' : 'a'
+      const raw = match ? match[2]! : line
       const notes = Array.from(raw.matchAll(/\[\[(.*?)\]\]/g)).map((m) => m[1]!)
       const text = raw.replace(/\[\[.*?\]\]/g, '').trim()
       return { role, text, notes }
     })
 
   return (
-    <div className="space-y-3">
+    <div className="chat">
       {turns.map((turn, i) => (
-        <div key={i} className={`flex flex-col ${turn.role === 'user' ? 'items-end' : 'items-start'}`}>
-          <span className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wider text-ink-muted">
-            {turn.role === 'user' ? 'Caller' : agentName}
-          </span>
-          {turn.text && (
-            <div
-              className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                turn.role === 'user'
-                  ? 'rounded-tr-md bg-gradient-to-br from-orange-400 to-orange-500 text-white'
-                  : 'clay-sm rounded-tl-md text-ink'
-              }`}
-            >
-              {turn.text}
-            </div>
-          )}
+        <div key={i} className="contents">
+          <small className={turn.role === 'u' ? 'r' : ''}>{turn.role === 'u' ? 'Caller' : agentName}</small>
+          {turn.text && <div className={`msg ${turn.role}`}>{turn.text}</div>}
           {turn.notes.map((note) => (
-            <span
-              key={note}
-              className={`pill mt-1.5 ${
-                note.startsWith('BOOKED') ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-              }`}
-            >
-              <Icon name={note.startsWith('BOOKED') ? 'checkCircle' : 'alert'} className="h-3.5 w-3.5" />
+            <span key={note} className={`pill ${note.startsWith('BOOKED') ? 'ok' : 'warn'} ${turn.role === 'u' ? 'self-end' : 'self-start'}`}>
               {note.startsWith('BOOKED') ? note.replace('BOOKED', 'Booked') : note.replace('BOOKING_FAILED:', 'Booking failed:')}
             </span>
           ))}
@@ -124,7 +105,7 @@ export function printAppointmentSlip(a: Appointment) {
   if (!win) return
   const row = (label: string, value: string) =>
     `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`
-  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Appointment #${a.id}</title>
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Appointment ${a.id}</title>
 <style>
   body{font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:#1e2633;margin:40px}
   .head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #ff7a1a;padding-bottom:14px}
@@ -135,7 +116,7 @@ export function printAppointmentSlip(a: Appointment) {
   .foot{margin-top:28px;color:#5b6576;font-size:12px;line-height:1.6}
 </style></head><body>
 <div class="head"><div><h1>${escapeHtml(a.clinic_name)}</h1><div class="sub">Appointment Confirmation</div></div>
-<span class="badge">#${a.id} · ${escapeHtml(a.status.toUpperCase())}</span></div>
+<span class="badge">${a.id} · ${escapeHtml(a.status.toUpperCase())}</span></div>
 <table>
 ${row('Patient Name', a.patient_name)}
 ${row('Phone', a.phone_number || '—')}

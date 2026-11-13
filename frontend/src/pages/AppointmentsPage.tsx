@@ -1,24 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { useAppointments, useConfirmAppointment, useUpdateAppointment, type AppointmentParams } from '../hooks/useAppointments'
+import { useAppointments, useConfirmAppointment, useUpdateAppointment, type Appointment, type AppointmentParams } from '../hooks/useAppointments'
 import { useDoctors, useClinicInfo } from '../hooks/useClinic'
 import { Icon } from '../components/Icon'
-import {
-  PageHeader,
-  StatCard,
-  Panel,
-  StatusBadge,
-  EmptyState,
-  Loader,
-  ErrorState,
-  formatTime,
-  paginate,
-  Pagination,
-} from '../components/ui'
+import { PageHeader, Kpi, StatusBadge, EmptyState, ErrorState, Avatar, Modal, TableSkeleton, formatTime, paginate, Pagination } from '../components/ui'
 import { localISODate, printAppointmentSlip } from '../components/clinic'
+import { toast, errorText } from '../components/toast'
 
 type Range = 'today' | 'upcoming' | 'date' | 'all'
-
 const RANGES: { key: Range; label: string }[] = [
   { key: 'today', label: 'Today' },
   { key: 'upcoming', label: 'Upcoming' },
@@ -32,23 +21,35 @@ function addDays(iso: string, days: number) {
   return localISODate(d)
 }
 
+function dayLabel(a: Appointment) {
+  if (!a.start_at) return 'To be scheduled'
+  const d = new Date(a.start_at)
+  const today = new Date()
+  const t = new Date(today)
+  t.setDate(today.getDate() + 1)
+  const base = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
+  if (d.toDateString() === today.toDateString()) return `Today · ${base}`
+  if (d.toDateString() === t.toDateString()) return `Tomorrow · ${base}`
+  return base
+}
+
 export function AppointmentsPage() {
   const today = localISODate(new Date())
-  const [range, setRange] = useState<Range>('all')
+  const [range, setRange] = useState<Range>('today')
   const [date, setDate] = useState(today)
   const [doctorId, setDoctorId] = useState('')
   const [status, setStatus] = useState('')
   const [source, setSource] = useState('')
   const [page, setPage] = useState(1)
   const [printing, setPrinting] = useState(false)
+  const [cancelling, setCancelling] = useState<Appointment | null>(null)
 
   const params: AppointmentParams = {}
   if (range === 'today') {
     params.date_from = today
     params.date_to = addDays(today, 1)
-  } else if (range === 'upcoming') {
-    params.date_from = today
-  } else if (range === 'date') {
+  } else if (range === 'upcoming') params.date_from = today
+  else if (range === 'date') {
     params.date_from = date
     params.date_to = addDays(date, 1)
   }
@@ -56,17 +57,14 @@ export function AppointmentsPage() {
   if (status) params.status = status
   if (source) params.source = source
 
-  const { data: appointments, isLoading, error } = useAppointments(params)
+  const { data: appointments, isLoading, error, refetch } = useAppointments(params)
   const { data: doctors } = useDoctors()
   const { data: info } = useClinicInfo()
-  const { mutate: updateAppointment, isPending } = useUpdateAppointment()
-  const { mutate: confirmAppointment, isPending: confirming } = useConfirmAppointment()
+  const update = useUpdateAppointment()
+  const confirm = useConfirmAppointment()
 
-  // Back to the first page whenever the filters change
   const filterKey = JSON.stringify(params)
   useEffect(() => setPage(1), [filterKey])
-
-  // Render every row while printing so the printout is the full list, not just this page
   useEffect(() => {
     if (!printing) return
     window.print()
@@ -74,227 +72,201 @@ export function AppointmentsPage() {
   }, [printing])
 
   const list = appointments || []
-  const paged = paginate(list, page, setPage, 7)
+  const paged = paginate(list, page, setPage, 12)
   const rows = printing ? list : paged.pageItems
-  const rangeLabel =
-    range === 'today'
-      ? `Today (${new Date().toLocaleDateString('en-US', { dateStyle: 'medium' })})`
-      : range === 'date'
-        ? new Date(`${date}T00:00:00`).toLocaleDateString('en-US', { dateStyle: 'medium' })
-        : range === 'upcoming'
-          ? 'Upcoming'
-          : 'All dates'
-  const doctorLabel = doctors?.find((d) => String(d.id) === doctorId)?.name
-
-  // Group rows by day for readability
-  const groups: { day: string; rows: typeof list }[] = []
+  const groups: { day: string; rows: Appointment[] }[] = []
   for (const a of rows) {
-    const day = a.start_at
-      ? new Date(a.start_at).toLocaleDateString('en-US', {
-          weekday: 'long',
-          month: 'long',
-          day: 'numeric',
-          year: 'numeric',
-        })
-      : 'To be scheduled'
+    const day = dayLabel(a)
     const last = groups[groups.length - 1]
     if (last && last.day === day) last.rows.push(a)
     else groups.push({ day, rows: [a] })
   }
+  const rangeLabel = RANGES.find((r) => r.key === range)!.label
+
+  const notify = (msg: string, who: string) => ({
+    onSuccess: () => toast.success(msg, who),
+    onError: (err: unknown) => toast.error('Could not update the appointment', errorText(err, 'Please try again.')),
+  })
 
   return (
     <div>
       <PageHeader
         title="Appointments"
-        subtitle="Everything the phone agent booked or requested, plus staff bookings, by date, doctor and status."
+        subtitle={
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="tabs">
+              {RANGES.map((r) => (
+                <button key={r.key} className={`tab ${range === r.key ? 'on' : ''}`} onClick={() => setRange(r.key)}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            {range === 'date' && <input type="date" className="field !h-[34px] !w-auto" value={date} onChange={(e) => setDate(e.target.value)} />}
+            <select className="field !h-[34px] !w-auto font-bold" value={doctorId} onChange={(e) => setDoctorId(e.target.value)} aria-label="Doctor">
+              <option value="">All doctors</option>
+              {doctors?.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+            <select className="field !h-[34px] !w-auto font-bold" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
+              <option value="">All statuses</option>
+              <option value="requested">Requested</option>
+              <option value="booked">Booked</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+            <select className="field !h-[34px] !w-auto font-bold" value={source} onChange={(e) => setSource(e.target.value)} aria-label="Booked by">
+              <option value="">Booked by anyone</option>
+              <option value="agent">Phone agent</option>
+              <option value="staff">Staff</option>
+            </select>
+          </div>
+        }
         actions={
-          <button onClick={() => setPrinting(true)} disabled={list.length === 0} className="clay-btn">
-            <Icon name="printer" className="h-4 w-4" /> Print List
+          <button className="btn" disabled={list.length === 0} onClick={() => setPrinting(true)}>
+            <Icon name="printer" className="h-4 w-4" /> Print list
           </button>
         }
       />
 
-      {/* Print-only heading */}
       <div className="print-only mb-4">
-        <p className="text-xl font-extrabold">{info?.clinic_name} — Appointments</p>
+        <p className="text-xl font-black">{info?.clinic_name} · Appointments</p>
         <p className="text-sm">
-          {rangeLabel}
-          {doctorLabel ? ` · ${doctorLabel}` : ''}
-          {status ? ` · ${status}` : ''} · Printed {new Date().toLocaleString('en-US')}
+          {rangeLabel} · Printed {new Date().toLocaleString('en-GB')}
         </p>
       </div>
 
-      <div className="no-print grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Showing" value={list.length} icon="calendar" tint="sky" />
-        <StatCard label="Awaiting Confirmation" value={list.filter((a) => a.status === 'requested').length} icon="clock" tint="amber" />
-        <StatCard
-          label="Booked / Confirmed"
+      <div className="grid g3 mb-3.5 no-print">
+        <Kpi label="Showing" value={list.length} hint={rangeLabel} icon="calendar" tone="a" />
+        <Kpi label="Awaiting confirmation" value={list.filter((a) => a.status === 'requested').length} hint="Requested by the phone agent" icon="clock" tone="warn" />
+        <Kpi
+          label="Booked / confirmed"
           value={list.filter((a) => a.status === 'booked' || a.status === 'confirmed').length}
+          hint={`${list.filter((a) => a.source === 'agent').length} booked by the agent`}
+          dir="up"
           icon="checkCircle"
-          tint="mint"
+          tone="ok"
         />
       </div>
 
-      {/* Filters */}
-      <div className="no-print mt-6 flex flex-wrap items-center gap-3">
-        <div className="clay-sm flex gap-1 rounded-2xl p-1">
-          {RANGES.map((r) => (
-            <button
-              key={r.key}
-              onClick={() => setRange(r.key)}
-              className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition ${
-                range === r.key ? 'bg-orange-500 text-white shadow' : 'text-ink-soft hover:text-ink'
-              }`}
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
-        {range === 'date' && (
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="clay-input !w-auto !py-2" />
-        )}
-        <select value={doctorId} onChange={(e) => setDoctorId(e.target.value)} className="clay-input !w-auto !py-2">
-          <option value="">All doctors</option>
-          {doctors?.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name} · {d.specialty}
-            </option>
-          ))}
-        </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className="clay-input !w-auto !py-2">
-          <option value="">All statuses</option>
-          <option value="requested">Requested</option>
-          <option value="booked">Booked</option>
-          <option value="confirmed">Confirmed</option>
-          <option value="completed">Completed</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-        <select value={source} onChange={(e) => setSource(e.target.value)} className="clay-input !w-auto !py-2">
-          <option value="">All sources</option>
-          <option value="agent">Phone agent</option>
-          <option value="staff">Staff</option>
-        </select>
-      </div>
-
-      {isLoading ? (
-        <Loader text="Loading appointments..." />
-      ) : error ? (
-        <div className="mt-6">
-          <ErrorState text="Error loading appointments" />
-        </div>
-      ) : (
-        <Panel className="mt-6">
-          <div>
-            <table className="clay-table">
+      <div className="card">
+        {isLoading ? (
+          <TableSkeleton rows={7} />
+        ) : error ? (
+          <div className="p-4">
+            <ErrorState text="Could not load appointments" onRetry={() => refetch()} />
+          </div>
+        ) : (
+          <div className="scroll">
+            <table className="t">
               <thead>
                 <tr>
+                  <th>Time</th>
                   <th>Patient</th>
-                  <th>Date & Time</th>
-                  <th className="col-2xl">Clinic</th>
-                  <th className="col-xl">Reason</th>
                   <th>Doctor</th>
+                  <th>Reason</th>
+                  <th>Booked by</th>
                   <th>Status</th>
                   <th className="no-print text-right">Actions</th>
                 </tr>
               </thead>
-              {groups.map((group) => (
-                <tbody key={group.day}>
-                  <tr className="!border-t-0">
-                    <td colSpan={7} className="!bg-orange-50/60 !py-2 text-xs font-extrabold uppercase tracking-wider text-orange-700">
-                      {group.day} · {group.rows.length} appointment{group.rows.length > 1 ? 's' : ''}
+              {groups.map((g) => (
+                <tbody key={g.day}>
+                  <tr>
+                    <td colSpan={7} className="grp">
+                      {g.day} · {g.rows.length} appointment{g.rows.length === 1 ? '' : 's'}
                     </td>
                   </tr>
-                  {group.rows.map((a) => (
-                    <tr key={a.id}>
-                      <td>
-                        <p className="font-bold text-ink">
-                          {a.patient_id ? (
-                            <Link to="/patients/$id" params={{ id: String(a.patient_id) }} className="hover:text-orange-600">
-                              {a.patient_name}
-                            </Link>
-                          ) : (
-                            a.patient_name
-                          )}
-                        </p>
-                        <p className="text-xs font-semibold text-ink-soft">{a.phone_number}</p>
-                      </td>
-                      <td>
-                        {a.start_at ? (
-                          <>
-                            <p className="font-bold text-ink">{formatTime(a.start_at)}</p>
-                            <p className="text-xs text-ink-soft">until {formatTime(a.end_at)}</p>
-                          </>
-                        ) : (
-                          <p className="text-ink-muted">Not set</p>
-                        )}
-                      </td>
-                      <td className="col-2xl text-ink-soft">{a.clinic_name}</td>
-                      <td className="col-xl max-w-[240px] text-ink-soft">
-                        <p className="line-clamp-2">{a.reason || '—'}</p>
-                      </td>
-                      <td>
-                        <p className="font-semibold text-ink">{a.doctor_name}</p>
-                        {a.doctor_specialty && <p className="text-xs text-ink-soft">{a.doctor_specialty}</p>}
-                      </td>
-                      <td>
-                        <StatusBadge status={a.status} />
-                      </td>
-                      <td className="no-print">
-                        <div className="flex justify-end gap-2">
-                          {a.status === 'requested' && (
-                            <button
-                              onClick={() => confirmAppointment(a.id)}
-                              disabled={confirming}
-                              className="clay-btn-green btn-sm"
-                            >
-                              <Icon name="checkCircle" className="h-4 w-4" /> Confirm
-                            </button>
-                          )}
-                          {a.start_at && (
-                            <button
-                              onClick={() => printAppointmentSlip(a)}
-                              className="clay-btn-ghost btn-icon !h-8 !w-8"
-                              title="Print slip"
-                            >
-                              <Icon name="printer" className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                          {(a.status === 'booked' || a.status === 'confirmed' || a.status === 'requested') && (
-                            <>
-                              <button
-                                onClick={() => updateAppointment({ id: a.id, status: 'completed' })}
-                                disabled={isPending}
-                                className="clay-btn-ghost btn-icon !h-8 !w-8 text-emerald-600"
-                                title="Mark completed"
-                              >
-                                <Icon name="checkCircle" className="h-3.5 w-3.5" />
+                  {g.rows.map((a) => {
+                    const open = ['requested', 'booked', 'confirmed'].includes(a.status)
+                    return (
+                      <tr key={a.id}>
+                        <td className="whitespace-nowrap text-[15px] font-black">
+                          {a.start_at ? formatTime(a.start_at) : '—'}
+                          {a.end_at && <small className="block text-[11.5px] font-normal text-ink-muted">until {formatTime(a.end_at)}</small>}
+                        </td>
+                        <td>
+                          <div className="who">
+                            <Avatar name={a.patient_name} />
+                            <div>
+                              <b>
+                                {a.patient_id ? (
+                                  <Link to="/patients/$id" params={{ id: String(a.patient_id) }} className="text-ink hover:text-brand">
+                                    {a.patient_name}
+                                  </Link>
+                                ) : (
+                                  a.patient_name
+                                )}
+                              </b>
+                              <small>{a.patient_id ? a.phone_number : `${a.phone_number || ''} · New patient`}</small>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          {a.doctor_name}
+                          {a.doctor_specialty && <small className="block text-ink-muted">{a.doctor_specialty}</small>}
+                        </td>
+                        <td className="max-w-[260px] text-ink-soft">{a.reason || '—'}</td>
+                        <td>{a.source === 'agent' ? 'Phone agent' : 'Staff'}</td>
+                        <td>
+                          <StatusBadge status={a.status} />
+                        </td>
+                        <td className="no-print">
+                          <div className="flex justify-end gap-1.5">
+                            {a.status === 'requested' && (
+                              <button className="btn sm p" disabled={confirm.isPending} onClick={() => confirm.mutate(a.id, notify('Appointment confirmed', a.patient_name))}>
+                                Confirm
                               </button>
-                              <button
-                                onClick={() => {
-                                  if (window.confirm(`Cancel ${a.patient_name}'s appointment?`)) {
-                                    updateAppointment({ id: a.id, status: 'cancelled' })
-                                  }
-                                }}
-                                disabled={isPending}
-                                className="clay-btn-ghost btn-icon !h-8 !w-8 text-rose-500"
-                                title="Cancel appointment"
-                              >
-                                <Icon name="xCircle" className="h-3.5 w-3.5" />
+                            )}
+                            {a.start_at && (
+                              <button className="btn sm" onClick={() => printAppointmentSlip(a)}>
+                                Slip
                               </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            )}
+                            {open && (
+                              <button className="btn sm" disabled={update.isPending} onClick={() => update.mutate({ id: a.id, status: 'completed' }, notify('Marked as completed', a.patient_name))}>
+                                Done
+                              </button>
+                            )}
+                            {open && (
+                              <button className="btn sm d" onClick={() => setCancelling(a)}>
+                                Cancel
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               ))}
             </table>
-            {list.length === 0 && <EmptyState icon="calendar" text="No appointments for this filter" />}
+            {list.length === 0 && <EmptyState icon="calendar" text="No appointments for this filter." />}
           </div>
-          <Pagination paged={paged} noun="appointments" />
-        </Panel>
-      )}
+        )}
+        {!isLoading && <Pagination paged={paged} noun="appointments" />}
+      </div>
+
+      <Modal open={!!cancelling} onClose={() => setCancelling(null)} title="Cancel this appointment?" subtitle={cancelling ? `${cancelling.patient_name} · ${cancelling.doctor_name}` : ''}>
+        <p className="text-ink-soft">The slot is released and other patients can book it.</p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="btn" onClick={() => setCancelling(null)}>
+            Keep it
+          </button>
+          <button
+            className="btn d"
+            onClick={() => {
+              if (!cancelling) return
+              update.mutate({ id: cancelling.id, status: 'cancelled' }, { ...notify('Appointment cancelled', cancelling.patient_name), onSettled: () => setCancelling(null) })
+            }}
+          >
+            Cancel appointment
+          </button>
+        </div>
+      </Modal>
     </div>
   )
 }

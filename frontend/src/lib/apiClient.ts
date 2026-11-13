@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios'
+import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axios'
 import { API_BASE, LOGIN_URL } from './paths'
 
 export interface ApiError {
@@ -22,9 +22,45 @@ export interface BrowserCallStatus {
   clinic_name: string
 }
 
+const ACCESS_KEY = 'access_token'
+const REFRESH_KEY = 'refresh_token'
+
+function readStore(key: string) {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeStore(key: string, value: string | null) {
+  try {
+    if (value === null) localStorage.removeItem(key)
+    else localStorage.setItem(key, value)
+  } catch {
+    // storage blocked: the session simply won't survive a reload
+  }
+}
+
+/** Seconds until a JWT's `exp`, or -1 if it can't be read. */
+function secondsLeft(token: string | null) {
+  if (!token) return -1
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/')))
+    return typeof payload.exp === 'number' ? payload.exp - Date.now() / 1000 : -1
+  } catch {
+    return -1
+  }
+}
+
+type RetriableConfig = InternalAxiosRequestConfig & { _retried?: boolean }
+
 class ApiClient {
   private client: AxiosInstance
   private token: string | null = null
+  private refreshToken: string | null = null
+  /** One refresh at a time; every request that hit a 401 waits for the same one. */
+  private refreshing: Promise<string> | null = null
 
   constructor() {
     this.client = axios.create({
@@ -32,41 +68,96 @@ class ApiClient {
       timeout: 30000,
     })
 
-    // Load token from localStorage
-    this.token = localStorage.getItem('access_token')
+    this.token = readStore(ACCESS_KEY)
+    this.refreshToken = readStore(REFRESH_KEY)
 
-    // Add auth interceptor
     this.client.interceptors.request.use((config) => {
       if (this.token) {
         config.headers.Authorization = `Bearer ${this.token}`
-        console.log('🔑 Auth header set for', config.url)
-      } else {
-        console.log('❌ No token available for', config.url)
       }
       return config
     })
 
-    // Handle 401 - redirect to login
+    // Access token expired: refresh once, retry the request, sign out only if refreshing fails
     this.client.interceptors.response.use(
       (response) => response,
-      (error) => {
-        if (error.response?.status === 401) {
-          localStorage.removeItem('access_token')
-          window.location.href = LOGIN_URL
+      async (error: AxiosError) => {
+        const original = error.config as RetriableConfig | undefined
+        const isAuthCall = original?.url?.startsWith('/auth/login') || original?.url?.startsWith('/auth/refresh')
+        if (error.response?.status === 401 && original && !original._retried && !isAuthCall && this.refreshToken) {
+          original._retried = true
+          try {
+            const token = await this.refreshAccessToken()
+            original.headers.Authorization = `Bearer ${token}`
+            return this.client(original)
+          } catch {
+            this.signOutAndRedirect()
+            return Promise.reject(error)
+          }
         }
+        if (error.response?.status === 401 && !isAuthCall) this.signOutAndRedirect()
         return Promise.reject(error)
-      }
+      },
     )
   }
 
+  private signOutAndRedirect() {
+    this.clearToken()
+    if (!window.location.pathname.endsWith('/login')) window.location.href = LOGIN_URL
+  }
+
+  /** Swap the refresh token for a new pair. Concurrent callers share one request. */
+  refreshAccessToken(): Promise<string> {
+    if (!this.refreshToken) return Promise.reject(new Error('No refresh token'))
+    if (!this.refreshing) {
+      // A bare axios call, so the 401 interceptor above can't loop on it
+      this.refreshing = axios
+        .post(`${API_BASE}/auth/refresh`, { refresh_token: this.refreshToken }, { timeout: 15000 })
+        .then((res) => {
+          this.setTokens(res.data.access_token, res.data.refresh_token)
+          return res.data.access_token as string
+        })
+        .finally(() => {
+          this.refreshing = null
+        })
+    }
+    return this.refreshing
+  }
+
+  /** A token that is valid for at least another minute (refreshing first if needed). For websockets. */
+  async getFreshToken(): Promise<string | null> {
+    if (this.token && secondsLeft(this.token) > 60) return this.token
+    if (!this.refreshToken) return this.token
+    try {
+      return await this.refreshAccessToken()
+    } catch {
+      return null
+    }
+  }
+
+  setTokens(access: string, refresh?: string | null) {
+    this.token = access
+    writeStore(ACCESS_KEY, access)
+    if (refresh) {
+      this.refreshToken = refresh
+      writeStore(REFRESH_KEY, refresh)
+    }
+  }
+
+  /** Kept for existing callers: sets only the access token. */
   setToken(token: string) {
-    this.token = token
-    localStorage.setItem('access_token', token)
+    this.setTokens(token)
   }
 
   clearToken() {
     this.token = null
-    localStorage.removeItem('access_token')
+    this.refreshToken = null
+    writeStore(ACCESS_KEY, null)
+    writeStore(REFRESH_KEY, null)
+  }
+
+  hasSession() {
+    return Boolean(this.token || this.refreshToken)
   }
 
   // Auth endpoints
@@ -109,6 +200,7 @@ class ApiClient {
     first_name: string
     last_name: string
     phone_number: string
+    preferred_language?: string
   }) {
     const response = await this.client.post('/patients/', data)
     return response.data
@@ -173,6 +265,21 @@ class ApiClient {
   // Calls (inbound + outbound; filter with ?direction=)
   async listCalls(params: { direction?: string; patient_id?: number; status?: string; skip?: number; limit?: number } = {}) {
     const response = await this.client.get('/calls/', { params })
+    return response.data
+  }
+
+  /** Server-side paged call search (Call Logs page). */
+  async searchCalls(params: {
+    page: number
+    page_size: number
+    direction?: string
+    date_from?: string
+    date_to?: string
+    name?: string
+    mrn?: string
+    phone?: string
+  }) {
+    const response = await this.client.get('/calls/page', { params })
     return response.data
   }
 
@@ -295,6 +402,28 @@ class ApiClient {
   }
 
   // Analytics
+  // Notifications (bell)
+  async listNotifications() {
+    const response = await this.client.get('/notifications/')
+    return response.data
+  }
+
+  async markNotificationsRead(keys: string[]) {
+    await this.client.post('/notifications/read', { keys })
+  }
+
+  async markAllNotificationsRead() {
+    await this.client.post('/notifications/read-all')
+  }
+
+  async clearNotifications(keys: string[]) {
+    await this.client.post('/notifications/clear', { keys })
+  }
+
+  async clearAllNotifications() {
+    await this.client.post('/notifications/clear-all')
+  }
+
   async getKpis() {
     const response = await this.client.get('/analytics/kpis')
     return response.data

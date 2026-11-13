@@ -329,11 +329,14 @@ async def dial_due_callbacks(db: AsyncSession) -> int:
 
 
 async def run_callback_dialer() -> None:
-    """Background loop: call people back when their callback falls due."""
+    """Background loop: close calls left "live" with no final status, then call people back when due."""
+    from app.services.agent.call_cleanup import close_stale_calls
+
     logger.info(f"Callback dialer started (every {settings.callback_poll_seconds}s)")
     while True:
         try:
             async with AsyncSessionLocal() as db:
+                await close_stale_calls(db)
                 await dial_due_callbacks(db)
         except asyncio.CancelledError:
             raise

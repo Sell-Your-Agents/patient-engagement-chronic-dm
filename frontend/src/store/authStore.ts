@@ -37,9 +37,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true, error: null })
     try {
       const response = await apiClient.login(email, password)
-      console.log('✅ Login response:', response)
-      apiClient.setToken(response.access_token)
-      console.log('🔑 Token saved:', localStorage.getItem('access_token')?.substring(0, 50) + '...')
+      apiClient.setTokens(response.access_token, response.refresh_token)
       set({
         user: response.user,
         isAuthenticated: true,
@@ -79,14 +77,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   loadUser: async () => {
-    const token = localStorage.getItem('access_token')
-    if (!token) {
+    if (!apiClient.hasSession()) {
       set({ isAuthenticated: false })
       return
     }
 
     try {
-      apiClient.setToken(token)
+      // An expired access token is refreshed automatically by the API client
       const user = await apiClient.getCurrentUser()
       set({ user, isAuthenticated: true })
     } catch (error) {

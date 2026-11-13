@@ -60,8 +60,21 @@ export function useUpdatePatient() {
         status?: string
       }
     }) => apiClient.updatePatient(data.id, data.updates),
+    onSuccess: (_d, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['patients'] })
+      queryClient.invalidateQueries({ queryKey: ['patient', vars.id] })
+    },
+  })
+}
+
+export function useCreatePatient() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data: { mrn: string; first_name: string; last_name: string; phone_number: string; preferred_language: string }) =>
+      apiClient.createPatient(data) as Promise<Patient>,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['patients'] })
+      queryClient.invalidateQueries({ queryKey: ['kpis'] })
     },
   })
 }

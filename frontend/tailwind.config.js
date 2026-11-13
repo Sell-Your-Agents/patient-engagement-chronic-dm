@@ -1,31 +1,35 @@
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
-      screens: {
-        // Enough vertical room to show the full Quick Call card in the sidebar
-        tall: { raw: '(min-height: 860px)' },
-      },
       fontFamily: {
-        sans: ['"Plus Jakarta Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        sans: ['Lato', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
+      // All colours come from the CSS variables in index.css so the accent
+      // (green / blue) and the mode (light / dark) switch everything at once.
       colors: {
-        ink: {
-          DEFAULT: '#1f2a37',
-          soft: '#4b5563',
-          muted: '#8a94a6',
-        },
+        ink: { DEFAULT: 'var(--ink)', soft: 'var(--ink-2)', muted: 'var(--ink-3)' },
+        line: { DEFAULT: 'var(--line)', soft: 'var(--line-2)' },
+        page: 'var(--bg)',
+        card: { DEFAULT: 'var(--card)', 2: 'var(--card-2)' },
         brand: {
-          50: '#fff4ea',
-          100: '#ffe4cc',
-          400: '#ff9a3c',
-          500: '#ff7a1a',
-          600: '#f26a0a',
+          DEFAULT: 'var(--accent)',
+          50: 'var(--accent-bg)',
+          100: 'var(--accent-bg)',
+          200: 'var(--accent-line)',
+          400: 'var(--accent-2)',
+          500: 'var(--accent)',
+          600: 'var(--accent-2)',
+          700: 'var(--accent-ink)',
+          800: 'var(--accent-ink)',
         },
+        ok: { DEFAULT: 'var(--ok)', bg: 'var(--ok-bg)' },
+        warn: { DEFAULT: 'var(--warn)', bg: 'var(--warn-bg)' },
+        bad: { DEFAULT: 'var(--bad)', bg: 'var(--bad-bg)' },
+        info: { DEFAULT: 'var(--info)', bg: 'var(--info-bg)' },
+        violet: { DEFAULT: 'var(--violet)', bg: 'var(--violet-bg)' },
       },
+      boxShadow: { card: 'var(--shadow)', lift: 'var(--lift)' },
     },
   },
   plugins: [],
