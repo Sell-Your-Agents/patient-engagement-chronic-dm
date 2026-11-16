@@ -1,11 +1,14 @@
+import re
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import joinedload
 
 from app.models.appointment import Appointment, SOURCE_AGENT
 from app.models.call_log import CallLog, DIRECTION_OUTBOUND
+from app.models.patient import PATIENT_TYPE_CHRONIC, PATIENT_TYPE_NORMAL, Patient
+from app.services.agent.context_shared import phone_digits
 from app.models.plan import Plan
 from app.models.disease_protocol import DiseaseProtocol
 from app.models.condition import PatientCondition
@@ -96,7 +99,21 @@ Current clinic date/time: {clinic_now().strftime('%A %Y-%m-%d %H:%M')}"""
         "appointments_created": [],
         "reschedule_date": None,
         "callback_id": None,
+        "patient_created": None,
     }
+
+    # A new caller phoning for themselves -> add them to the patients table (before the steps below,
+    # so escalations, appointment requests and callbacks are linked to the new patient)
+    if not outbound and not call.patient_id:
+        new_patient = await register_new_caller(db, call, summary)
+        if new_patient:
+            for appointment in appointments:
+                appointment.patient_id = appointment.patient_id or new_patient.id
+            actions["patient_created"] = new_patient.id
+
+    # The patient said they have a long-term condition -> flag them chronic (never unflag automatically)
+    if call.patient_id and summary.get("reached") == "patient":
+        record_chronic_conditions(await db.get(Patient, call.patient_id), summary)
 
     # Fill gaps on appointments booked during the call
     for appointment in appointments:
@@ -191,6 +208,99 @@ Current clinic date/time: {clinic_now().strftime('%A %Y-%m-%d %H:%M')}"""
     await db.commit()
 
     return actions
+
+
+def _split_name(name: str) -> Tuple[str, str]:
+    """'Ravi Kumar Sharma' -> ('Ravi', 'Kumar Sharma'); a single word has no last name."""
+    parts = name.split()
+    return parts[0], " ".join(parts[1:])
+
+
+async def _next_mrn(db: AsyncSession) -> str:
+    """Next free MRN in the PT001, PT002, ... series used by the seed data."""
+    count = (await db.execute(select(func.count(Patient.id)))).scalar() or 0
+    number = count + 1
+    while (await db.execute(select(Patient.id).where(Patient.mrn == f"PT{number:03d}"))).scalar_one_or_none():
+        number += 1
+    return f"PT{number:03d}"
+
+
+def record_chronic_conditions(patient: Optional[Patient], summary: dict) -> None:
+    """Set the chronic flag and note the conditions the patient mentioned (added to any already noted)."""
+    mentioned = [str(c).strip() for c in (summary.get("chronic_conditions") or []) if str(c).strip()]
+    if not patient or not mentioned:
+        return
+    patient.patient_type = PATIENT_TYPE_CHRONIC
+    noted = [c.strip() for c in (patient.chronic_conditions_reported or "").split(",") if c.strip()]
+    for condition in mentioned:
+        if condition.lower() not in (n.lower() for n in noted):
+            noted.append(condition)
+    patient.chronic_conditions_reported = ", ".join(noted)[:255]
+
+
+async def register_new_caller(db: AsyncSession, call: CallLog, summary: dict) -> Optional[Patient]:
+    """Add an unknown inbound caller to the patients table, so the next call from them is recognised.
+
+    Only when the caller spoke for themselves (not for a relative: the number would then belong to
+    the wrong person), gave a name, and called from a usable number that no patient already has.
+    Links this call, and earlier calls / appointments / callbacks / escalations from the number, to them.
+    """
+    name = " ".join((summary.get("patient_name") or "").split())
+    digits = phone_digits(call.phone_number)
+    if not name or not digits or summary.get("reached") != "patient":
+        return None
+
+    existing = (
+        await db.execute(
+            select(Patient)
+            .where(or_(Patient.phone_number.like(f"%{digits}"), Patient.secondary_phone.like(f"%{digits}")))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if existing:
+        # Number already on file (e.g. an inactive patient): link the call, don't duplicate
+        call.patient_id = existing.id
+        return None
+
+    first_name, last_name = _split_name(name)
+    patient = Patient(
+        mrn=await _next_mrn(db),
+        first_name=first_name[:120],
+        last_name=last_name[:120],
+        # Digits only (keeping a leading +) so later calls match it, whatever spacing was typed
+        phone_number=("+" if call.phone_number.strip().startswith("+") else "")
+        + re.sub(r"\D", "", call.phone_number)[:19],
+        status="active",
+        patient_type=PATIENT_TYPE_NORMAL,  # becomes "chronic" below if they mentioned a long-term condition
+    )
+    db.add(patient)
+    await db.flush()
+    call.patient_id = patient.id
+    call.patient_name = name
+
+    # Everything already on file from this number belongs to the new patient
+    number_match = lambda column: column.like(f"%{digits}")  # noqa: E731
+    for model, phone_column in (
+        (CallLog, CallLog.phone_number),
+        (Appointment, Appointment.phone_number),
+        (CallbackSchedule, CallbackSchedule.phone_number),
+    ):
+        await db.execute(
+            update(model)
+            .where(model.patient_id.is_(None), number_match(phone_column))
+            .values(patient_id=patient.id)
+            .execution_options(synchronize_session=False)
+        )
+    await db.execute(
+        update(Escalation)
+        .where(
+            Escalation.patient_id.is_(None),
+            Escalation.call_log_id.in_(select(CallLog.id).where(CallLog.patient_id == patient.id)),
+        )
+        .values(patient_id=patient.id)
+        .execution_options(synchronize_session=False)
+    )
+    return patient
 
 
 async def handle_failed_call(

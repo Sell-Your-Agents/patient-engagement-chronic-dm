@@ -1,4 +1,15 @@
-import { usePatients, useInitiateCall } from '../hooks/usePatients'
+import { usePatients, useInitiateCall, type Patient, type PatientType } from '../hooks/usePatients'
+
+/** Chronic / Normal pill for the patient type; hover shows the conditions the patient mentioned. */
+export function PatientTypeBadge({ patient }: { patient: Patient }) {
+  return patient.patient_type === 'chronic' ? (
+    <span className="pill bg-amber-100 text-amber-700" title={patient.chronic_conditions_reported || undefined}>
+      Chronic
+    </span>
+  ) : (
+    <span className="pill bg-slate-100 text-slate-600">Normal</span>
+  )
+}
 import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Icon } from '../components/Icon'
@@ -9,6 +20,7 @@ export function PatientListPage() {
   const { mutate: initiateCall, isPending: isInitiating } = useInitiateCall()
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState<'all' | PatientType>('all')
   const [page, setPage] = useState(1)
   const [callMessage, setCallMessage] = useState<{ patientId: number; ok: boolean; text: string } | null>(null)
   const [callingPatientId, setCallingPatientId] = useState<number | null>(null)
@@ -17,14 +29,16 @@ export function PatientListPage() {
   if (error) return <ErrorState text="Error loading patients" />
 
   const activePatients = patients?.filter((p) => p.status === 'active') || []
+  const chronicPatients = patients?.filter((p) => p.patient_type === 'chronic') || []
   const query = search.trim().toLowerCase()
   const filtered =
     patients?.filter(
       (p) =>
-        !query ||
-        `${p.first_name} ${p.last_name}`.toLowerCase().includes(query) ||
-        p.mrn.toLowerCase().includes(query) ||
-        p.phone_number.includes(query)
+        (typeFilter === 'all' || p.patient_type === typeFilter) &&
+        (!query ||
+          `${p.first_name} ${p.last_name}`.toLowerCase().includes(query) ||
+          p.mrn.toLowerCase().includes(query) ||
+          p.phone_number.includes(query))
     ) || []
   const paged = paginate(filtered, page, setPage, 7)
 
@@ -47,15 +61,30 @@ export function PatientListPage() {
       <PageHeader title="Patients" subtitle="Manage enrolled patients and start outreach calls." />
 
       {/* Stats */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Total Patients" value={patients?.length || 0} icon="users" tint="peach" />
         <StatCard label="Active" value={activePatients.length} icon="activity" tint="mint" />
+        <StatCard label="Chronic Patients" value={chronicPatients.length} icon="activity" tint="peach" />
       </div>
 
       {/* Patient List */}
       <div className="clay mt-6 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 p-5">
           <p className="card-title">All Patients</p>
+          <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
+          <select
+            value={typeFilter}
+            onChange={(e) => {
+              setTypeFilter(e.target.value as 'all' | PatientType)
+              setPage(1)
+            }}
+            className="clay-input !w-auto !py-2.5"
+            aria-label="Filter by patient type"
+          >
+            <option value="all">All patients</option>
+            <option value="chronic">Chronic</option>
+            <option value="normal">Normal</option>
+          </select>
           <div className="relative w-full sm:w-72">
             <Icon name="search" className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
             <input
@@ -68,6 +97,7 @@ export function PatientListPage() {
               className="clay-input !py-2.5 !pl-10"
             />
           </div>
+          </div>
         </div>
         <div>
           <table className="clay-table w-full">
@@ -76,6 +106,7 @@ export function PatientListPage() {
                 <th>Name</th>
                 <th className="col-lg">MRN</th>
                 <th>Phone</th>
+                <th>Type</th>
                 <th>Status</th>
                 <th>Action</th>
               </tr>
@@ -92,10 +123,18 @@ export function PatientListPage() {
                       <span className="font-bold text-ink">
                         {patient.first_name} {patient.last_name}
                       </span>
+                      {!patient.enrolled_at && (
+                        <span className="pill bg-sky-100 text-sky-700" title="Added automatically when they phoned the clinic">
+                          New caller
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="col-lg font-mono text-ink-soft">{patient.mrn}</td>
                   <td className="font-semibold text-ink">{patient.phone_number}</td>
+                  <td>
+                    <PatientTypeBadge patient={patient} />
+                  </td>
                   <td>
                     <StatusBadge status={patient.status} />
                   </td>

@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../lib/apiClient'
 
+export type PatientType = 'chronic' | 'normal'
+
 export interface Patient {
   id: number
   mrn: string
@@ -9,6 +11,10 @@ export interface Patient {
   phone_number: string
   preferred_language: string
   status: string
+  patient_type: PatientType
+  chronic_conditions_reported: string | null
+  enrolled_at: string | null
+  created_at: string | null
 }
 
 export function usePatients(skip = 0, limit = 50) {
@@ -58,10 +64,12 @@ export function useUpdatePatient() {
         phone_number?: string
         preferred_language?: string
         status?: string
+        patient_type?: PatientType
       }
     }) => apiClient.updatePatient(data.id, data.updates),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['patients'] })
+      queryClient.invalidateQueries({ queryKey: ['patient', variables.id] })
     },
   })
 }

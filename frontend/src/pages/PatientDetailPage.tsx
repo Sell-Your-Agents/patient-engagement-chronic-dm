@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useParams } from '@tanstack/react-router'
-import { usePatient, useInitiateCall } from '../hooks/usePatients'
+import { usePatient, useInitiateCall, useUpdatePatient, type PatientType } from '../hooks/usePatients'
+import { PatientTypeBadge } from './PatientListPage'
 import { useCalls } from '../hooks/useCalls'
 import { useAppointments } from '../hooks/useAppointments'
 import { Icon } from '../components/Icon'
@@ -24,6 +25,7 @@ export function PatientDetailPage() {
   const { data: calls } = useCalls({ patient_id: patientId })
   const { data: appointments } = useAppointments({ patient_id: patientId })
   const { mutate: initiateCall, isPending } = useInitiateCall()
+  const { mutate: updatePatient, isPending: isUpdating } = useUpdatePatient()
   const [callMessage, setCallMessage] = useState<{ ok: boolean; text: string } | null>(null)
   const [callPage, setCallPage] = useState(1)
 
@@ -87,6 +89,32 @@ export function PatientDetailPage() {
               <Field label="Phone">{patient.phone_number}</Field>
               <Field label="Preferred Language">
                 <span className="uppercase">{patient.preferred_language}</span>
+              </Field>
+              <Field label="Patient Type">
+                <div className="flex flex-wrap items-center gap-2">
+                  <PatientTypeBadge patient={patient} />
+                  <select
+                    value={patient.patient_type}
+                    onChange={(e) =>
+                      updatePatient({ id: patientId, updates: { patient_type: e.target.value as PatientType } })
+                    }
+                    disabled={isUpdating}
+                    className="clay-input !w-auto !py-1.5 text-sm"
+                    aria-label="Change patient type"
+                  >
+                    <option value="chronic">Chronic</option>
+                    <option value="normal">Normal</option>
+                  </select>
+                  {isUpdating && <span className="text-xs text-ink-muted">Saving...</span>}
+                </div>
+                {patient.chronic_conditions_reported && (
+                  <p className="mt-1 text-xs font-normal text-ink-soft">
+                    Mentioned on calls: {patient.chronic_conditions_reported}
+                  </p>
+                )}
+              </Field>
+              <Field label="Source">
+                {patient.enrolled_at ? 'Enrolled in care program' : 'Added automatically from an inbound call'}
               </Field>
             </div>
           </div>

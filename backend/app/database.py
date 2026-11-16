@@ -75,7 +75,24 @@ _NEW_COLUMNS = {
         "default_followup_interval_minutes": "INTEGER",
     },
     "plans": {"followup_interval_minutes": "INTEGER"},
+    "patients": {
+        "patient_type": "VARCHAR(10) NOT NULL DEFAULT 'normal'",
+        "chronic_conditions_reported": "VARCHAR(255)",
+    },
 }
+
+
+def _mark_chronic_patients(sync_conn) -> None:
+    """Every patient with an active chronic condition on file is patient_type 'chronic'.
+
+    Also carries over the earlier true/false is_chronic column if a database still has it.
+    """
+    chronic_ids = "SELECT patient_id FROM patient_conditions WHERE status = 'active'"
+    if "is_chronic" in {c["name"] for c in inspect(sync_conn).get_columns("patients")}:
+        chronic_ids += " UNION SELECT id FROM patients WHERE is_chronic = TRUE"
+    sync_conn.execute(text(
+        f"UPDATE patients SET patient_type = 'chronic' WHERE patient_type <> 'chronic' AND id IN ({chronic_ids})"
+    ))
 
 
 def _add_new_columns(sync_conn) -> None:
@@ -96,6 +113,7 @@ async def init_db():
         await conn.run_sync(_upgrade_callback_schedules)
         await conn.run_sync(_add_new_columns)
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_mark_chronic_patients)
 
 
 async def get_db():
