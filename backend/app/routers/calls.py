@@ -3,7 +3,7 @@
 GET / and GET /stats take ?direction=inbound|outbound; POST / dials an enrolled patient (outbound).
 /callbacks lists the callbacks callers asked for (and failed-call retries) so staff can act on them.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -205,6 +205,69 @@ async def list_calls(
         query = query.where(CallLog.warning_signs_detected == True)
     result = await db.execute(query.offset(skip).limit(limit))
     return result.scalars().all()
+
+
+class CallPage(BaseModel):
+    items: List[CallResponse]
+    total: int
+    page: int
+    page_size: int
+    #: Matching calls per direction (same filters, ignoring the direction tab)
+    counts: Dict[str, int]
+
+
+def _as_utc_naive(value: Optional[datetime]) -> Optional[datetime]:
+    """Call timestamps are stored as naive UTC; accept aware or naive input."""
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+@router.get("/page", response_model=CallPage)
+async def search_calls(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    direction: Optional[str] = Query(None, pattern=DIRECTION_PATTERN),
+    date_from: Optional[datetime] = Query(None, description="Calls at or after this time (ISO 8601)"),
+    date_to: Optional[datetime] = Query(None, description="Calls before this time (ISO 8601)"),
+    name: Optional[str] = Query(None, max_length=120, description="Part of the patient's name"),
+    mrn: Optional[str] = Query(None, max_length=50, description="Part of the patient's MRN"),
+    phone: Optional[str] = Query(None, max_length=30, description="Part of the phone number"),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Call log search, paged on the server. Newest first."""
+    when = func.coalesce(CallLog.started_at, CallLog.created_at)
+    filters = []
+    start, end = _as_utc_naive(date_from), _as_utc_naive(date_to)
+    if start:
+        filters.append(when >= start)
+    if end:
+        filters.append(when < end)
+    if name and name.strip():
+        filters.append(CallLog.patient_name.ilike(f"%{name.strip()}%"))
+    if phone and phone.strip():
+        digits = "".join(ch for ch in phone if ch.isdigit())
+        if digits:
+            filters.append(func.replace(func.replace(CallLog.phone_number, " ", ""), "-", "").ilike(f"%{digits}%"))
+    if mrn and mrn.strip():
+        patient_ids = select(Patient.id).where(Patient.mrn.ilike(f"%{mrn.strip()}%"))
+        filters.append(CallLog.patient_id.in_(patient_ids))
+
+    # Per-direction counts for the tabs
+    count_rows = await db.execute(select(CallLog.direction, func.count(CallLog.id)).where(*filters).group_by(CallLog.direction))
+    by_direction = {d: n for d, n in count_rows.all()}
+    counts = {"all": sum(by_direction.values()), "outbound": by_direction.get("outbound", 0), "inbound": by_direction.get("inbound", 0)}
+
+    if direction:
+        filters.append(CallLog.direction == direction)
+    total = counts[direction] if direction else counts["all"]
+    result = await db.execute(
+        select(CallLog).where(*filters).order_by(when.desc(), CallLog.id.desc()).offset((page - 1) * page_size).limit(page_size)
+    )
+    return {"items": result.scalars().all(), "total": total, "page": page, "page_size": page_size, "counts": counts}
 
 
 @router.get("/stats")

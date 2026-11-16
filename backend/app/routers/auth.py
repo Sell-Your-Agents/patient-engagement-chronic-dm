@@ -7,7 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.user import User
-from app.auth.security import hash_password, verify_password, create_access_token
+from jose import JWTError
+
+from app.auth.security import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
+)
 from app.auth.deps import get_current_user
 from app.config import get_settings
 
@@ -41,8 +49,27 @@ class UserResponse(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str
+    #: Seconds until the access token expires
+    expires_in: int
     user: UserResponse
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+def issue_tokens(user: User) -> dict:
+    """A fresh access + refresh pair. Each refresh restarts the refresh window (sliding session)."""
+    claims = {"sub": str(user.id)}
+    return {
+        "access_token": create_access_token(claims, timedelta(minutes=settings.access_token_expire_minutes)),
+        "refresh_token": create_refresh_token(claims, timedelta(minutes=settings.refresh_token_expire_minutes)),
+        "token_type": "bearer",
+        "expires_in": settings.access_token_expire_minutes * 60,
+        "user": UserResponse.model_validate(user),
+    }
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -95,17 +122,24 @@ async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
             detail="User account is inactive",
         )
 
-    # Create access token
-    access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
-    access_token = create_access_token(
-        data={"sub": str(user.id)}, expires_delta=access_token_expires
-    )
+    return issue_tokens(user)
 
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": UserResponse.from_orm(user),
-    }
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """Swap a valid refresh token for a new token pair, so an active user stays signed in."""
+    invalid = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Your session has expired. Please sign in again.",
+    )
+    try:
+        user_id = int(decode_refresh_token(body.refresh_token).get("sub"))
+    except (JWTError, TypeError, ValueError):
+        raise invalid
+    user = await db.get(User, user_id)
+    if not user or not user.is_active:
+        raise invalid
+    return issue_tokens(user)
 
 
 @router.get("/me", response_model=UserResponse)

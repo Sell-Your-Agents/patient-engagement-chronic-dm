@@ -1,134 +1,141 @@
 import { useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import { useDoctors, useDoctorAvailability, type Doctor } from '../hooks/useClinic'
 import { useAppointments } from '../hooks/useAppointments'
-import { Icon } from '../components/Icon'
-import { PageHeader, EmptyState, Loader, ErrorState } from '../components/ui'
-import { WEEKDAYS, hhmmTo12h, initials, localISODate, mondayIndex } from '../components/clinic'
+import { PageHeader, EmptyState, Loader, ErrorState, Avatar, friendlyTime } from '../components/ui'
+import { WEEKDAYS, hhmmTo12h, localISODate, mondayIndex } from '../components/clinic'
+
+type Filter = 'all' | 'on' | 'off'
+
+/** "Mon – Sat" for a contiguous run, otherwise "Mon, Wed, Fri". */
+function daysLabel(days: number[]) {
+  const s = [...days].sort((a, b) => a - b)
+  if (!s.length) return '—'
+  const run = s.every((d, i) => i === 0 || d === s[i - 1]! + 1)
+  return run && s.length >= 3 ? `${WEEKDAYS[s[0]!]} – ${WEEKDAYS[s[s.length - 1]!]}` : s.map((d) => WEEKDAYS[d]).join(', ')
+}
 
 export function DoctorsPage() {
-  const { data: doctors, isLoading, error } = useDoctors()
-  const { data: upcoming } = useAppointments({ date_from: localISODate(new Date()), status: 'booked' })
+  const { data: doctors, isLoading, error, refetch } = useDoctors()
+  const { data: upcoming } = useAppointments({ date_from: localISODate(new Date()) })
+  const [filter, setFilter] = useState<Filter>('all')
 
-  if (isLoading) return <Loader text="Loading doctors..." />
-  if (error) return <ErrorState text="Error loading doctors" />
+  if (isLoading) return <Loader text="Loading doctors…" variant="cards" />
+  if (error) return <ErrorState text="Could not load doctors" onRetry={() => refetch()} />
 
-  const bookedCount = (doctorId: number) => (upcoming || []).filter((a) => a.doctor_id === doctorId).length
+  const today = mondayIndex(new Date())
+  const onDuty = (d: Doctor) => d.is_active && d.working_days.includes(today)
+  const all = doctors || []
+  const list = all.filter((d) => (filter === 'all' ? true : filter === 'on' ? onDuty(d) : !onDuty(d)))
+  const booked = (id: number) => (upcoming || []).filter((a) => a.doctor_id === id && a.status !== 'cancelled').length
 
   return (
     <div>
       <PageHeader
         title="Doctors"
-        subtitle="Clinic doctors, their working hours and open slots the agent can book."
+        subtitle={`${all.filter(onDuty).length} on duty today · ${all.length} doctors`}
+        actions={
+          <div className="tabs">
+            {(
+              [
+                ['all', 'All', all.length],
+                ['on', 'On duty', all.filter(onDuty).length],
+                ['off', 'Off today', all.filter((d) => !onDuty(d)).length],
+              ] as const
+            ).map(([k, l, n]) => (
+              <button key={k} className={`tab ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>
+                {l} <span className="c">{n}</span>
+              </button>
+            ))}
+          </div>
+        }
       />
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {doctors?.map((d) => <DoctorCard key={d.id} doctor={d} upcoming={bookedCount(d.id)} />)}
-      </div>
-      {doctors?.length === 0 && <EmptyState icon="stethoscope" text="No doctors configured" />}
+      {list.length === 0 ? (
+        <div className="card">
+          <EmptyState icon="stethoscope" text="No doctors here." />
+        </div>
+      ) : (
+        <div className="grid g3">
+          {list.map((d) => (
+            <DoctorCard key={d.id} doctor={d} duty={onDuty(d)} today={today} booked={booked(d.id)} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-function DoctorCard({ doctor, upcoming }: { doctor: Doctor; upcoming: number }) {
-  const [showSlots, setShowSlots] = useState(false)
+function DoctorCard({ doctor, duty, today, booked }: { doctor: Doctor; duty: boolean; today: number; booked: number }) {
   const { data: slots } = useDoctorAvailability(doctor.id, 7)
-  const todayIdx = mondayIndex(new Date())
-  const worksToday = doctor.working_days.includes(todayIdx)
-  const nextSlot = slots?.[0]
-
-  // Group free slots by day for the expanded view
-  const byDay: { day: string; times: string[] }[] = []
-  for (const s of slots || []) {
-    const d = new Date(s)
-    const day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-    const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-    const last = byDay[byDay.length - 1]
-    if (last && last.day === day) last.times.push(time)
-    else byDay.push({ day, times: [time] })
-  }
+  const [showAll, setShowAll] = useState(false)
+  const next = slots?.[0]
+  const todayKey = localISODate(new Date())
+  const todaySlots = (slots || []).filter((s) => localISODate(new Date(s)) === todayKey)
+  const shown = showAll ? slots || [] : todaySlots.length ? todaySlots : (slots || []).slice(0, 6)
+  const label = todaySlots.length && !showAll ? 'Free today' : showAll ? 'Free this week' : 'Next free slots'
 
   return (
-    <div className="clay flex flex-col p-4">
-      <div className="flex items-start gap-3">
-        <span className="logo-mark h-10 w-10 !rounded-xl text-xs font-extrabold text-white">{initials(doctor.name)}</span>
+    <div className="card doc">
+      <div className="hd">
+        <Avatar name={doctor.name} size={46} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[15px] font-extrabold text-ink">{doctor.name}</p>
-          <p className="text-[13px] font-semibold text-orange-600">{doctor.specialty}</p>
+          <b className="truncate">{doctor.name}</b>
+          <small>{doctor.specialty}</small>
         </div>
-        <span className={`pill ${worksToday ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
-          {worksToday ? 'On duty' : 'Off today'}
+        <span className={`pill ${duty ? 'ok dotted' : 'mute'}`}>{duty ? 'On duty' : 'Off today'}</span>
+      </div>
+      <p className="text-[13.5px] text-ink-soft">Treats: {doctor.treats}</p>
+      <div className="spec">
+        <div>
+          <div className="lbl !text-[10px]">Days</div>
+          <b>{daysLabel(doctor.working_days)}</b>
+        </div>
+        <div>
+          <div className="lbl !text-[10px]">Hours</div>
+          <b>
+            {hhmmTo12h(doctor.start_time).replace(':00', '')} – {hhmmTo12h(doctor.end_time).replace(':00', '')}
+          </b>
+        </div>
+        <div>
+          <div className="lbl !text-[10px]">Slot</div>
+          <b>{doctor.slot_minutes} min</b>
+        </div>
+      </div>
+      <div className="days">
+        {WEEKDAYS.map((w, i) => (
+          <i key={w} title={w} className={`${doctor.working_days.includes(i) ? 'on' : ''} ${i === today ? 'today' : ''}`} />
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line-soft pt-3">
+        <span className="text-[13px]">
+          Next free: <b>{next ? friendlyTime(next) : slots ? 'None this week' : '…'}</b>
+        </span>
+        <span className="text-[12.5px] text-ink-muted">
+          {slots?.length ?? 0} free this week · {booked} booked
         </span>
       </div>
-
-      <p className="mt-2.5 truncate text-xs text-ink-soft" title={doctor.treats}>Treats: {doctor.treats}</p>
-
-      {/* Working days */}
-      <div className="mt-3 flex gap-1">
-        {WEEKDAYS.map((label, i) => {
-          const works = doctor.working_days.includes(i)
-          return (
-            <span
-              key={label}
-              className={`flex h-7 flex-1 items-center justify-center rounded-lg text-[10.5px] font-bold ${
-                works ? 'bg-orange-100 text-orange-700' : 'clay-inset text-ink-muted'
-              } ${i === todayIdx ? 'ring-2 ring-orange-400' : ''}`}
-            >
-              {label}
-            </span>
-          )
-        })}
-      </div>
-
-      <div className="clay-inset mt-3 grid grid-cols-3 gap-2 rounded-2xl p-2.5 text-center">
+      {slots && slots.length > 0 && (
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-ink-muted">Timing</p>
-          <p className="mt-0.5 whitespace-nowrap text-[11px] font-bold text-ink">
-            {hhmmTo12h(doctor.start_time)}–{hhmmTo12h(doctor.end_time)}
-          </p>
-        </div>
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-ink-muted">Slot</p>
-          <p className="mt-0.5 text-xs font-bold text-ink">{doctor.slot_minutes} min</p>
-        </div>
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-ink-muted">Upcoming</p>
-          <p className="mt-0.5 text-xs font-bold text-ink">{upcoming} booked</p>
-        </div>
-      </div>
-
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <p className="text-xs text-ink-soft">
-          Next free:{' '}
-          <b className="text-ink">
-            {nextSlot
-              ? new Date(nextSlot).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })
-              : slots
-                ? 'None this week'
-                : '…'}
-          </b>
-        </p>
-        <button onClick={() => setShowSlots((s) => !s)} className="clay-btn-ghost btn-sm">
-          {showSlots ? 'Hide slots' : `Free slots (${slots?.length ?? 0})`}
-          <Icon name="chevronDown" className={`h-3.5 w-3.5 transition ${showSlots ? 'rotate-180' : ''}`} />
-        </button>
-      </div>
-
-      {showSlots && (
-        <div className="clay-scroll mt-3 max-h-56 space-y-3 overflow-y-auto pr-1">
-          {byDay.map((group) => (
-            <div key={group.day}>
-              <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-ink-muted">{group.day}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {group.times.map((t) => (
-                  <span key={t} className="rounded-lg bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
-                    {t}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
-          {byDay.length === 0 && <p className="text-xs text-ink-muted">No free slots in the next 7 days.</p>}
+          <div className="lbl mb-2">{label}</div>
+          <div className={`slots ${showAll ? 'max-h-40 overflow-y-auto' : ''}`}>
+            {shown.map((s) => (
+              <span key={s} title={new Date(s).toLocaleString()}>
+                {showAll || !todaySlots.length
+                  ? new Date(s).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+                  : new Date(s).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+              </span>
+            ))}
+          </div>
         </div>
       )}
+      <div className="flex gap-2">
+        <Link to="/appointments" className="btn sm p flex-1">
+          Book slot
+        </Link>
+        <button className="btn sm" onClick={() => setShowAll((s) => !s)} disabled={!slots?.length}>
+          {showAll ? 'Less' : 'Week view'}
+        </button>
+      </div>
     </div>
   )
 }

@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     jwt_secret_key: str
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
+    # Refresh tokens keep an active user signed in. Each refresh restarts this window,
+    # so a user is signed out only after this long without the app making any request.
+    refresh_token_expire_minutes: int = 720
 
     # Twilio voice
     twilio_account_sid: str = ""

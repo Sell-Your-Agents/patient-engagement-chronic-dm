@@ -37,6 +37,7 @@ from app.services.agent.call_context import (
 )
 from app.services.agent.context_shared import is_recorded
 from app.services.agent.call_finalizer import finalize_call
+from app.services.agent.call_cleanup import close_call_now
 from app.services.scheduling.callback_service import (
     parse_callback_time,
     schedule_requested_callback,
@@ -367,6 +368,11 @@ async def run_call_stream(websocket: WebSocket, call_sid: str, db: AsyncSession,
                 await finalize_call(session.call.id, db, transcript, duration_seconds)
             except Exception as exc:
                 logger.error(f"[{call_sid}] Finalize error: {exc}", exc_info=True)
+                # Never leave the call looking live because the summary step failed
+                await close_call_now(db, call_id=session.call.id)
+        else:
+            # Setup failed before the session existed: close the call record anyway
+            await close_call_now(db, call_sid=call_sid)
         try:
             await websocket.close()
         except Exception:

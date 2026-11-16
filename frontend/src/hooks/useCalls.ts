@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { apiClient } from '../lib/apiClient'
 
 export type CallDirection = 'inbound' | 'outbound'
@@ -60,8 +60,8 @@ export function useCalls(params: { direction?: CallDirection; patient_id?: numbe
   return useQuery({
     queryKey: ['calls', params],
     queryFn: async () => (await apiClient.listCalls({ ...params, limit: 500 })) as Call[],
-    // Call activity changes quickly while a call is live
-    refetchInterval: 5000,
+    // Poll quickly only while a call is live, so the live count drops to 0 soon after hang-up
+    refetchInterval: (query) => ((query.state.data as Call[] | undefined)?.some(isLiveCall) ? 5000 : 30000),
   })
 }
 
@@ -77,8 +77,7 @@ export function useCallbacks() {
   return useQuery({
     queryKey: ['callbacks'],
     queryFn: async () => (await apiClient.listCallbacks()) as Callback[],
-    // A callback can be scheduled by a live call at any moment
-    refetchInterval: 5000,
+    refetchInterval: 30000,
   })
 }
 
@@ -118,5 +117,49 @@ export function useDialCallback() {
       queryClient.invalidateQueries({ queryKey: ['callbacks'] })
       queryClient.invalidateQueries({ queryKey: ['calls'] })
     },
+  })
+}
+
+const LIVE_STATUSES = ['initiated', 'ringing', 'in-progress', 'in_progress', 'calling']
+const LIVE_MAX_MS = 30 * 60 * 1000
+
+/**
+ * True while a call is actually connected or connecting. A call still marked live after
+ * 30 minutes ended without a final status (the backend closes those), so it doesn't count.
+ */
+export function isLiveCall(c: Call) {
+  if (!LIVE_STATUSES.includes(c.status)) return false
+  const v = c.started_at || c.created_at
+  const started = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(v) ? v : `${v}Z`).getTime()
+  return Date.now() - started < LIVE_MAX_MS
+}
+
+export interface CallSearch {
+  page: number
+  page_size: number
+  direction?: CallDirection
+  /** ISO 8601 */
+  date_from?: string
+  date_to?: string
+  name?: string
+  mrn?: string
+  phone?: string
+}
+
+export interface CallPage {
+  items: Call[]
+  total: number
+  page: number
+  page_size: number
+  counts: { all: number; outbound: number; inbound: number }
+}
+
+/** One page of the call log, filtered and paged by the backend. */
+export function useCallPage(params: CallSearch) {
+  return useQuery({
+    queryKey: ['calls', 'page', params],
+    queryFn: async () => (await apiClient.searchCalls(params)) as CallPage,
+    placeholderData: keepPreviousData,
+    refetchInterval: (query) => ((query.state.data as CallPage | undefined)?.items.some(isLiveCall) ? 5000 : 30000),
   })
 }

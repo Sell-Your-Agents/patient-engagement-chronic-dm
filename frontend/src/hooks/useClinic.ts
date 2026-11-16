@@ -30,8 +30,6 @@ export interface Doctor {
   is_active: boolean
 }
 
-// Clinic info/stats refresh a bit faster than the rest while calls are live.
-const LIVE_REFRESH = 5000
 
 export function useClinicInfo() {
   return useQuery({
@@ -45,7 +43,7 @@ export function useClinicStats() {
   return useQuery({
     queryKey: ['clinic', 'stats'],
     queryFn: async () => (await apiClient.getClinicStats()) as ClinicStats,
-    refetchInterval: LIVE_REFRESH * 2,
+    refetchInterval: 30000,
   })
 }
 
@@ -61,6 +59,7 @@ export function useDoctorAvailability(doctorId: number | null, days = 7) {
     queryKey: ['clinic', 'availability', doctorId, days],
     queryFn: async () => (await apiClient.getDoctorAvailability(doctorId!, days)) as string[],
     enabled: doctorId !== null,
+    staleTime: 120_000,
   })
 }
 

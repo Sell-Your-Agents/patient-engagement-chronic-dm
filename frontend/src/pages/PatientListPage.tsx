@@ -1,175 +1,295 @@
-import { usePatients, useInitiateCall, type Patient, type PatientType } from '../hooks/usePatients'
+import { useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import {
+  useInitiateCall,
+  type Patient,
+  type PatientType,
+} from "../hooks/usePatients";
+import {
+  usePatientRoster,
+  careTone,
+  type CareStatus,
+} from "../hooks/usePatientRoster";
+import { Icon } from "../components/Icon";
+import {
+  PageHeader,
+  Kpi,
+  Loader,
+  ErrorState,
+  EmptyState,
+  Avatar,
+  Spinner,
+  friendlyTime,
+  paginate,
+  Pagination,
+} from "../components/ui";
+import { PatientFormModal } from "../components/PatientForm";
+import { toast, errorText } from "../components/toast";
 
 /** Chronic / Normal pill for the patient type; hover shows the conditions the patient mentioned. */
 export function PatientTypeBadge({ patient }: { patient: Patient }) {
-  return patient.patient_type === 'chronic' ? (
-    <span className="pill bg-amber-100 text-amber-700" title={patient.chronic_conditions_reported || undefined}>
+  return patient.patient_type === "chronic" ? (
+    <span
+      className="pill warn"
+      title={patient.chronic_conditions_reported || undefined}
+    >
       Chronic
     </span>
   ) : (
-    <span className="pill bg-slate-100 text-slate-600">Normal</span>
-  )
+    <span className="pill mute">Normal</span>
+  );
 }
-import { useState } from 'react'
-import { useNavigate } from '@tanstack/react-router'
-import { Icon } from '../components/Icon'
-import { PageHeader, StatCard, StatusBadge, EmptyState, Loader, ErrorState, paginate, Pagination } from '../components/ui'
+
+const FILTERS: (CareStatus | "All")[] = [
+  "All",
+  "Stable",
+  "Needs review",
+  "Escalated",
+  "Inactive",
+];
 
 export function PatientListPage() {
-  const { data: patients, isLoading, error } = usePatients(0, 100)
-  const { mutate: initiateCall, isPending: isInitiating } = useInitiateCall()
-  const navigate = useNavigate()
-  const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState<'all' | PatientType>('all')
-  const [page, setPage] = useState(1)
-  const [callMessage, setCallMessage] = useState<{ patientId: number; ok: boolean; text: string } | null>(null)
-  const [callingPatientId, setCallingPatientId] = useState<number | null>(null)
+  const navigate = useNavigate();
+  const { rows, isLoading, error, refetch } = usePatientRoster();
+  const { mutate: initiateCall } = useInitiateCall();
+  const [filter, setFilter] = useState<CareStatus | "All">("All");
+  const [q, setQ] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | PatientType>("all");
+  const [page, setPage] = useState(1);
+  const [calling, setCalling] = useState<number | null>(null);
+  const [adding, setAdding] = useState(false);
 
-  if (isLoading) return <Loader text="Loading patients..." />
-  if (error) return <ErrorState text="Error loading patients" />
+  if (isLoading) return <Loader text="Loading patients…" />;
+  if (error)
+    return (
+      <ErrorState text="Could not load patients" onRetry={() => refetch()} />
+    );
 
-  const activePatients = patients?.filter((p) => p.status === 'active') || []
-  const chronicPatients = patients?.filter((p) => p.patient_type === 'chronic') || []
-  const query = search.trim().toLowerCase()
-  const filtered =
-    patients?.filter(
-      (p) =>
-        (typeFilter === 'all' || p.patient_type === typeFilter) &&
-        (!query ||
-          `${p.first_name} ${p.last_name}`.toLowerCase().includes(query) ||
-          p.mrn.toLowerCase().includes(query) ||
-          p.phone_number.includes(query))
-    ) || []
-  const paged = paginate(filtered, page, setPage, 7)
+  const open = (id: number) =>
+    navigate({ to: "/patients/$id", params: { id: String(id) } });
 
-  const startCall = (patientId: number) => {
-    setCallMessage(null)
-    setCallingPatientId(patientId)
+  const activeCount = rows.filter((r) => r.patient.status === "active").length;
+  const chronicCount = rows.filter(
+    (r) => r.patient.patient_type === "chronic",
+  ).length;
+  const newCallerCount = rows.filter((r) => !r.patient.enrolled_at).length;
+  const attentionCount = rows.filter(
+    (r) => r.status === "Escalated" || r.status === "Needs review",
+  ).length;
+
+  const query = q.trim().toLowerCase();
+  const filtered = rows.filter(
+    (r) =>
+      (filter === "All" || r.status === filter) &&
+      (typeFilter === "all" || r.patient.patient_type === typeFilter) &&
+      (!query ||
+        r.name.toLowerCase().includes(query) ||
+        r.patient.mrn.toLowerCase().includes(query) ||
+        r.patient.phone_number.includes(query)),
+  );
+  const paged = paginate(filtered, page, setPage, 7);
+
+  const startCall = (id: number, name: string) => {
+    setCalling(id);
     initiateCall(
-      { patient_id: patientId },
+      { patient_id: id },
       {
-        onSuccess: () => setCallMessage({ patientId, ok: true, text: 'Call initiated' }),
-        onError: (err: any) =>
-          setCallMessage({ patientId, ok: false, text: err?.response?.data?.detail || 'Failed to initiate call' }),
-        onSettled: () => setCallingPatientId(null),
-      }
-    )
-  }
+        onSuccess: () =>
+          toast.success("Calling now", `The agent is calling ${name}`),
+        onError: (err) =>
+          toast.error(
+            `Could not call ${name}`,
+            errorText(err, "Please try again."),
+          ),
+        onSettled: () => setCalling(null),
+      },
+    );
+  };
 
   return (
     <div>
-      <PageHeader title="Patients" subtitle="Manage enrolled patients and start outreach calls." />
+      <PageHeader
+        title="Patients"
+        subtitle="Manage enrolled patients and start outreach calls."
+        actions={
+          <button onClick={() => setAdding(true)} className="btn p">
+            <Icon name="plus" className="h-4 w-4" /> Add patient
+          </button>
+        }
+      />
 
       {/* Stats */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Total Patients" value={patients?.length || 0} icon="users" tint="peach" />
-        <StatCard label="Active" value={activePatients.length} icon="activity" tint="mint" />
-        <StatCard label="Chronic Patients" value={chronicPatients.length} icon="activity" tint="peach" />
+      <div className="grid g4 mb-3.5">
+        <Kpi
+          label="Total patients"
+          value={rows.length}
+          hint={`${newCallerCount} added from inbound calls`}
+          icon="users"
+          tone="a"
+        />
+        <Kpi
+          label="Active"
+          value={activeCount}
+          hint={`${rows.length - activeCount} inactive · open to outreach`}
+          icon="activity"
+          tone="ok"
+        />
+        <Kpi
+          label="Chronic patients"
+          value={chronicCount}
+          hint={`${rows.length - chronicCount} normal · long-term care`}
+          icon="heart"
+          tone="violet"
+        />
+        <Kpi
+          label="Need attention"
+          value={attentionCount}
+          valueTone={attentionCount ? "bad" : undefined}
+          hint="Escalated or needs review"
+          icon="alert"
+          tone="bad"
+        />
       </div>
 
       {/* Patient List */}
-      <div className="clay mt-6 overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3 p-5">
-          <p className="card-title">All Patients</p>
-          <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
-          <select
-            value={typeFilter}
-            onChange={(e) => {
-              setTypeFilter(e.target.value as 'all' | PatientType)
-              setPage(1)
-            }}
-            className="clay-input !w-auto !py-2.5"
-            aria-label="Filter by patient type"
-          >
-            <option value="all">All patients</option>
-            <option value="chronic">Chronic</option>
-            <option value="normal">Normal</option>
-          </select>
-          <div className="relative w-full sm:w-72">
-            <Icon name="search" className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
-            <input
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value)
-                setPage(1)
-              }}
-              placeholder="Search name, MRN or phone"
-              className="clay-input !py-2.5 !pl-10"
-            />
+      <div className="card">
+        <div className="card-h flex-wrap">
+          <div className="tabs">
+            {FILTERS.map((f) => (
+              <button
+                key={f}
+                onClick={() => {
+                  setFilter(f);
+                  setPage(1);
+                }}
+                className={`tab ${filter === f ? "on" : ""}`}
+              >
+                {f}{" "}
+                <span className="c">
+                  {f === "All"
+                    ? rows.length
+                    : rows.filter((r) => r.status === f).length}
+                </span>
+              </button>
+            ))}
           </div>
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <select
+              value={typeFilter}
+              onChange={(e) => {
+                setTypeFilter(e.target.value as "all" | PatientType);
+                setPage(1);
+              }}
+              className="field !h-[42px] !w-auto font-bold"
+              aria-label="Filter by patient type"
+            >
+              <option value="all">All types</option>
+              <option value="chronic">Chronic</option>
+              <option value="normal">Normal</option>
+            </select>
+            <div className="search !pr-0">
+              <Icon name="search" className="h-4 w-4" />
+              <input
+                value={q}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search name, MRN or phone"
+                className="!pr-3"
+              />
+            </div>
           </div>
         </div>
-        <div>
-          <table className="clay-table w-full">
+        <div className="scroll">
+          <table className="t">
             <thead>
               <tr>
-                <th>Name</th>
-                <th className="col-lg">MRN</th>
-                <th>Phone</th>
+                <th>Patient</th>
+                <th>MRN</th>
                 <th>Type</th>
-                <th>Status</th>
-                <th>Action</th>
+                <th>Care status</th>
+                <th>Last call</th>
+                <th className="!text-center">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {paged.pageItems.map((patient) => (
-                <tr key={patient.id}>
-                  <td>
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-extrabold text-orange-600">
-                        {patient.first_name.charAt(0)}
-                        {patient.last_name.charAt(0)}
+              {paged.pageItems.map((r) => {
+                const p = r.patient;
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <div className="who">
+                        <Avatar name={r.name} />
+                        <div className="min-w-0">
+                          <b className="flex items-center gap-2">
+                            {r.name}
+                            {!p.enrolled_at && (
+                              <span
+                                className="pill info"
+                                title="Added automatically when they phoned the clinic"
+                              >
+                                New caller
+                              </span>
+                            )}
+                          </b>
+                          <small>{p.phone_number}</small>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="mono text-ink-soft">{p.mrn}</td>
+                    <td>
+                      <PatientTypeBadge patient={p} />
+                    </td>
+                    <td>
+                      <span className={`pill ${careTone(r.status)} dotted`}>
+                        {r.status}
                       </span>
-                      <span className="font-bold text-ink">
-                        {patient.first_name} {patient.last_name}
-                      </span>
-                      {!patient.enrolled_at && (
-                        <span className="pill bg-sky-100 text-sky-700" title="Added automatically when they phoned the clinic">
-                          New caller
-                        </span>
+                    </td>
+                    <td className="whitespace-nowrap text-ink-soft">
+                      {friendlyTime(
+                        r.lastCall?.started_at || r.lastCall?.created_at,
                       )}
-                    </div>
-                  </td>
-                  <td className="col-lg font-mono text-ink-soft">{patient.mrn}</td>
-                  <td className="font-semibold text-ink">{patient.phone_number}</td>
-                  <td>
-                    <PatientTypeBadge patient={patient} />
-                  </td>
-                  <td>
-                    <StatusBadge status={patient.status} />
-                  </td>
-                  <td>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={() => startCall(patient.id)}
-                        disabled={isInitiating}
-                        title="Call patient"
-                        className="clay-btn btn-sm"
-                      >
-                        <Icon name="phoneCall" className="h-4 w-4" />
-                        {callingPatientId === patient.id ? 'Calling...' : 'Call'}
-                      </button>
-                      <button
-                        onClick={() => navigate({ to: '/patients/$id', params: { id: String(patient.id) } })}
-                        className="clay-btn-ghost btn-sm"
-                      >
-                        View <Icon name="chevronRight" className="h-4 w-4" />
-                      </button>
-                      {callMessage?.patientId === patient.id && (
-                        <span className={`text-xs font-semibold ${callMessage.ok ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          {callMessage.text}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td>
+                      <div className="flex justify-center gap-1.5">
+                        <button
+                          onClick={() => startCall(p.id, r.name)}
+                          disabled={calling !== null}
+                          title="Call patient"
+                          className="btn sm p"
+                        >
+                          {calling === p.id ? (
+                            <Spinner />
+                          ) : (
+                            <Icon name="phoneCall" className="h-4 w-4" />
+                          )}
+                          {calling === p.id ? "Calling…" : "Call"}
+                        </button>
+                        <button onClick={() => open(p.id)} className="btn sm">
+                          View <Icon name="chevronRight" className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
-          {filtered.length === 0 && <EmptyState icon="users" text="No patients found" />}
+          {filtered.length === 0 && (
+            <EmptyState icon="users" text="No patients found" />
+          )}
         </div>
         <Pagination paged={paged} noun="patients" />
       </div>
+
+      {adding && (
+        <PatientFormModal
+          open
+          onClose={() => setAdding(false)}
+          onSaved={(p) => p?.id && open(p.id)}
+        />
+      )}
     </div>
-  )
+  );
 }

@@ -11,6 +11,7 @@ import { AppointmentsPage } from './pages/AppointmentsPage'
 import { CallsPage } from './pages/CallsPage'
 import { DoctorsPage } from './pages/DoctorsPage'
 import { CallAgentPage } from './pages/CallAgentPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { ROUTER_BASEPATH } from './lib/paths'
 
 // Root route
@@ -96,6 +97,12 @@ const callAgentRoute = new Route({
   component: CallAgentPage,
 })
 
+const settingsRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/settings',
+  component: SettingsPage,
+})
+
 // Create route tree
 const routeTree = rootRoute.addChildren([
   loginRoute,
@@ -109,6 +116,7 @@ const routeTree = rootRoute.addChildren([
   callListRoute,
   doctorsRoute,
   callAgentRoute,
+  settingsRoute,
 ])
 
 // Create router

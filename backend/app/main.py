@@ -45,6 +45,14 @@ async def lifespan(app: FastAPI):
     async with AsyncSessionLocal() as db:
         await seed_clinic_doctors(db)
 
+    # Calls left "live" by a restart (their audio stream died with the old process)
+    from app.services.agent.call_cleanup import close_stale_calls
+
+    async with AsyncSessionLocal() as db:
+        closed = await close_stale_calls(db, browser_only_any_age=True)
+        if closed:
+            logger.info(f"Closed {closed} call(s) left in progress by a previous run")
+
     # Call people back when the callback they asked for falls due
     from app.services.scheduling.callback_service import run_callback_dialer
 
@@ -126,6 +134,7 @@ from app.routers import (
     clinic_twilio,
     browser_call,
     sim_call,
+    notifications,
 )
 
 app.include_router(auth.router)
@@ -141,6 +150,7 @@ app.include_router(clinic.router)
 app.include_router(clinic_twilio.router)
 app.include_router(browser_call.router)
 app.include_router(sim_call.router)
+app.include_router(notifications.router)
 
 
 @app.get("/", include_in_schema=False)

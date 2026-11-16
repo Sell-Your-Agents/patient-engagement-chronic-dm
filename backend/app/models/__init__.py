@@ -8,6 +8,7 @@ from app.models.call_log import CallLog, CallTurn
 from app.models.callback_schedule import CallbackSchedule
 from app.models.escalation import Escalation
 from app.models.appointment import Appointment
+from app.models.notification import NotificationClear, NotificationRead
 
 __all__ = [
     "User",
@@ -22,4 +23,6 @@ __all__ = [
     "CallbackSchedule",
     "Escalation",
     "Appointment",
+    "NotificationRead",
+    "NotificationClear",
 ]

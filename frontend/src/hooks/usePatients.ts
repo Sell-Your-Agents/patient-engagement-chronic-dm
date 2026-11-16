@@ -1,75 +1,92 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { apiClient } from '../lib/apiClient'
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiClient } from "../lib/apiClient";
 
-export type PatientType = 'chronic' | 'normal'
+export type PatientType = "chronic" | "normal";
 
 export interface Patient {
-  id: number
-  mrn: string
-  first_name: string
-  last_name: string
-  phone_number: string
-  preferred_language: string
-  status: string
-  patient_type: PatientType
-  chronic_conditions_reported: string | null
-  enrolled_at: string | null
-  created_at: string | null
+  id: number;
+  mrn: string;
+  first_name: string;
+  last_name: string;
+  phone_number: string;
+  preferred_language: string;
+  status: string;
+  patient_type: PatientType;
+  chronic_conditions_reported: string | null;
+  enrolled_at: string | null;
+  created_at: string | null;
 }
 
 export function usePatients(skip = 0, limit = 50) {
   return useQuery({
-    queryKey: ['patients', skip, limit],
+    queryKey: ["patients", skip, limit],
     queryFn: async () => {
-      const data = await apiClient.listPatients(skip, limit)
-      return data as Patient[]
+      const data = await apiClient.listPatients(skip, limit);
+      return data as Patient[];
     },
-  })
+  });
 }
 
 export function usePatient(id: number) {
   return useQuery({
-    queryKey: ['patient', id],
+    queryKey: ["patient", id],
     queryFn: async () => {
-      const data = await apiClient.getPatient(id)
-      return data as Patient
+      const data = await apiClient.getPatient(id);
+      return data as Patient;
     },
     enabled: id > 0,
-  })
+  });
 }
 
 export function useInitiateCall() {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (data: { patient_id: number; plan_id?: number }) => {
-      return await apiClient.initiateCall(data)
+      return await apiClient.initiateCall(data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['calls'] })
-      queryClient.invalidateQueries({ queryKey: ['call-stats'] })
-      queryClient.invalidateQueries({ queryKey: ['kpis'] })
+      queryClient.invalidateQueries({ queryKey: ["calls"] });
+      queryClient.invalidateQueries({ queryKey: ["call-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["kpis"] });
     },
-  })
+  });
 }
 
 export function useUpdatePatient() {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: {
-      id: number
+      id: number;
       updates: {
-        first_name?: string
-        last_name?: string
-        phone_number?: string
-        preferred_language?: string
-        status?: string
-        patient_type?: PatientType
-      }
+        first_name?: string;
+        last_name?: string;
+        phone_number?: string;
+        preferred_language?: string;
+        status?: string;
+        patient_type?: PatientType;
+      };
     }) => apiClient.updatePatient(data.id, data.updates),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['patients'] })
-      queryClient.invalidateQueries({ queryKey: ['patient', variables.id] })
+    onSuccess: (_d, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["patients"] });
+      queryClient.invalidateQueries({ queryKey: ["patient", vars.id] });
     },
-  })
+  });
+}
+
+export function useCreatePatient() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      mrn: string;
+      first_name: string;
+      last_name: string;
+      phone_number: string;
+      preferred_language: string;
+    }) => apiClient.createPatient(data) as Promise<Patient>,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["patients"] });
+      queryClient.invalidateQueries({ queryKey: ["kpis"] });
+    },
+  });
 }

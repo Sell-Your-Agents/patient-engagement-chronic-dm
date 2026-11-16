@@ -124,7 +124,8 @@ export function CallAgentPage() {
   // ---------- Direct test call (no Twilio) ----------
   const startDirect = async () => {
     resetForCall()
-    const token = localStorage.getItem('access_token')
+    // Refresh first if the access token is about to expire, so the call isn't refused mid-setup
+    const token = await apiClient.getFreshToken()
     if (!token) {
       setError('Your login has expired. Log in again and retry.')
       setPhase('idle')
@@ -225,11 +226,11 @@ export function CallAgentPage() {
       />
 
       {/* Real clinic number */}
-      <Panel title="Real phone number" className="mb-5">
+      <Panel title="Real phone number" className="mb-3.5">
         <div className="space-y-2 px-5 pb-5 text-sm text-ink-soft">
           {setup.inbound_number ? (
             <p className="flex flex-wrap items-center gap-2">
-              <Icon name="phoneCall" className="h-4 w-4 text-emerald-600" />
+              <Icon name="phoneCall" className="h-4 w-4 text-ok" />
               Call <b className="font-mono text-ink">{setup.inbound_number}</b> from any phone to reach {setup.agent_name}.
             </p>
           ) : (
@@ -241,7 +242,7 @@ export function CallAgentPage() {
             </li>
             <li>
               Twilio console → Phone Numbers → the number → Voice configuration:
-              <div className="clay-inset mt-2 space-y-1 rounded-xl p-3 font-mono text-xs text-ink">
+              <div className="mt-2 space-y-1 rounded-[10px] border border-line-soft bg-card-2 p-3 font-mono text-xs text-ink">
                 <div className="break-all">A call comes in (POST): {setup.voice_url}</div>
                 <div className="break-all">Call status changes (POST): {setup.status_url}</div>
               </div>
@@ -250,19 +251,17 @@ export function CallAgentPage() {
         </div>
       </Panel>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+      <div className="grid g2">
         <Panel title="Place a test call">
           <div className="space-y-4 px-5 pb-5">
-            <div className="clay-sm inline-flex flex-wrap gap-1 rounded-2xl p-1" role="group" aria-label="How to call">
+            <div className="flex flex-wrap gap-2" role="group" aria-label="How to call">
               {(['direct', 'twilio'] as Mode[]).map((m) => (
                 <button
                   key={m}
                   type="button"
                   disabled={inCall}
                   onClick={() => setMode(m)}
-                  className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition ${
-                    mode === m ? 'bg-orange-500 text-white shadow' : 'text-ink-soft hover:text-ink'
-                  }`}
+                  className={`tab ${mode === m ? 'on' : ''}`}
                 >
                   {m === 'direct' ? 'Direct test (no Twilio)' : 'Through Twilio'}
                 </button>
@@ -276,12 +275,12 @@ export function CallAgentPage() {
             </p>
 
             {!ready && mode === 'direct' && (
-              <p className="rounded-2xl bg-amber-50 p-3 text-sm text-amber-800">
+              <p className="warnbox">
                 Add to backend/.env and restart the backend: <b>{setup.direct_missing.join(', ')}</b>
               </p>
             )}
             {!ready && mode === 'twilio' && (
-              <div className="rounded-2xl bg-amber-50 p-3 text-sm text-amber-800">
+              <div className="warnbox">
                 <p>
                   Add to backend/.env and restart the backend: <b>{setup.missing.join(', ')}</b>
                 </p>
@@ -296,7 +295,7 @@ export function CallAgentPage() {
               <span className="mb-1.5 block text-xs font-bold text-ink-soft">Call as</span>
               <select
                 id="call-as"
-                className="clay-input"
+                className="field"
                 value={callAs}
                 disabled={inCall}
                 onChange={(e) => setCallAs(e.target.value)}
@@ -315,7 +314,7 @@ export function CallAgentPage() {
                 <span className="mb-1.5 block text-xs font-bold text-ink-soft">Caller’s phone number (optional)</span>
                 <input
                   id="caller-number"
-                  className="clay-input"
+                  className="field"
                   placeholder="+91 98765 43210"
                   value={callerNumber}
                   disabled={inCall}
@@ -337,7 +336,7 @@ export function CallAgentPage() {
               <input
                 id="record-call"
                 type="checkbox"
-                className="h-4 w-4 accent-orange-500"
+                className="h-4 w-4 accent-brand-500"
                 checked={record}
                 disabled={inCall}
                 onChange={(e) => {
@@ -351,7 +350,7 @@ export function CallAgentPage() {
             </label>
 
             {error && (
-              <div className="flex items-start gap-2 rounded-2xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">
+              <div className="alertbox !items-start !text-[13px]">
                 <Icon name="alert" className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{error}</span>
               </div>
@@ -362,7 +361,7 @@ export function CallAgentPage() {
                 <button
                   onClick={mode === 'direct' ? startDirect : startTwilio}
                   disabled={!ready}
-                  className="clay-btn-green"
+                  className="btn p"
                 >
                   <Icon name="phoneCall" className="h-4 w-4" />
                   {phase === 'ended' ? 'Call again' : 'Call the agent'}
@@ -371,11 +370,11 @@ export function CallAgentPage() {
                 <>
                   <button
                     onClick={hangUp}
-                    className="inline-flex min-h-[44px] items-center gap-2 rounded-[14px] bg-rose-600 px-4 py-2 text-sm font-bold text-white"
+                    className="btn !border-bad !bg-bad !text-white"
                   >
                     <Icon name="phoneMissed" className="h-4 w-4" /> Hang up
                   </button>
-                  <button onClick={toggleMute} disabled={phase !== 'live'} className="clay-btn-ghost">
+                  <button onClick={toggleMute} disabled={phase !== 'live'} className="btn">
                     {muted ? 'Unmute' : 'Mute'}
                   </button>
                 </>
@@ -383,8 +382,8 @@ export function CallAgentPage() {
               <span className="text-sm font-semibold text-ink-soft" aria-live="polite">
                 {phase === 'connecting' && 'Connecting…'}
                 {phase === 'live' && (
-                  <span className="inline-flex items-center gap-2 text-emerald-600">
-                    <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" /> Live · {formatSeconds(seconds)}
+                  <span className="inline-flex items-center gap-2 text-ok">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-ok" /> Live · {formatSeconds(seconds)}
                   </span>
                 )}
                 {phase === 'ended' && `Call ended (${formatSeconds(seconds)})`}
@@ -405,10 +404,10 @@ export function CallAgentPage() {
             {logEntry && (
               <>
                 <div className="flex flex-wrap items-center gap-3">
-                  <b className="text-ink">Call #{logEntry.id}</b>
+                  <b className="text-ink">Call {logEntry.id}</b>
                   <OutcomeBadge outcome={logEntry.outcome} />
                   {logEntry.warning_signs_detected && (
-                    <span className="pill bg-rose-100 text-rose-700">
+                    <span className="pill pill-bad">
                       <Icon name="alert" className="h-3.5 w-3.5" /> Warning signs
                     </span>
                   )}
@@ -419,11 +418,11 @@ export function CallAgentPage() {
                   <p className="text-ink-muted">{lookupDone ? 'No summary was produced for this call.' : 'Writing the summary…'}</p>
                 )}
                 {logEntry.transcript && (
-                  <div className="clay-inset clay-scroll max-h-80 overflow-y-auto rounded-[18px] p-4">
+                  <div className="max-h-80 overflow-y-auto rounded-[10px] border border-line-soft bg-card-2 p-4">
                     <TranscriptView transcript={logEntry.transcript} agentName={setup.agent_name} />
                   </div>
                 )}
-                <Link to="/calls" className="inline-flex items-center gap-1 font-bold text-orange-600 hover:underline">
+                <Link to="/calls" className="inline-flex items-center gap-1 font-bold text-brand-700 hover:underline">
                   Open Call Logs <Icon name="chevronRight" className="h-4 w-4" />
                 </Link>
               </>
