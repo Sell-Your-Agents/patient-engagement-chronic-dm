@@ -28,7 +28,7 @@ from app.database import AsyncSessionLocal, init_db
 from app.models.user import User
 from app.models.condition import ChronicCondition
 from app.models.disease_protocol import DiseaseProtocol
-from app.models.patient import Patient
+from app.models.patient import PATIENT_TYPE_CHRONIC, Patient
 from app.models.condition import PatientCondition
 from app.models.plan import Plan
 from app.knowledge.seed_protocols import (
@@ -172,6 +172,7 @@ async def seed_database():
                 status="active",
             )
             db.add(pc)
+            (await db.get(Patient, patient_id)).patient_type = PATIENT_TYPE_CHRONIC
             await db.flush()
 
             # Get protocol for this condition

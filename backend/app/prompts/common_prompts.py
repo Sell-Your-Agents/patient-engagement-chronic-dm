@@ -173,6 +173,7 @@ Return only a JSON object with exactly these fields (use null when something doe
   "patient_name": "full name of the patient, or null",
   "reason": "short phrase: why the call happened or the caller's problem, or null",
   "symptoms": ["list", "of", "symptoms"],
+  "chronic_conditions": ["long-term conditions the patient says they have, e.g. diabetes, high blood pressure, asthma, COPD, heart disease, thyroid, kidney disease"],
   "urgency": "routine|soon|urgent|emergency",
   "emergency_advice_given": true|false,
   "outcome": "booked|appointment_requested|check_in_completed|check_in_partial|declined|info_only|call_later|not_reached|language_support_needed|wrong_number|no_conversation",
@@ -198,4 +199,5 @@ Rules:
 - If the person who answered was not the patient, set "reached" accordingly and identity_confirmed=false, and do not record health details for the patient.
 - Set callback_requested=true only if the person asked to be called back later. Work out times like "tomorrow at 5" from the current clinic date and time.
 - If the call went to voicemail or nobody spoke, set outcome to "not_reached".
+- chronic_conditions: only long-term conditions the patient has been told they have or takes regular medicine for. Not short illnesses like fever, cold or an injury. Use [] when none were mentioned.
 """

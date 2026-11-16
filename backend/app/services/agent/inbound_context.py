@@ -1,8 +1,9 @@
 """Calls to the clinic number (Maya as receptionist), and calling those callers back.
 
-The receptionist picks a doctor and books a real slot. It never greets a caller by name from
-the phone number alone: a known number only gets its care plan after the caller confirms who
-they are (see inbound_prompts.CALLER_HINT_PATIENT).
+The receptionist picks a doctor and books a real slot. A number that matches a patient on record
+is asked "Am I speaking with <name>?" in the opening line; their care plan, chronic status and past
+calls are used only after a clear yes (see inbound_prompts.CALLER_HINT_PATIENT). An unknown caller
+is added to the patients table after the call (call_finalizer.register_new_caller).
 """
 from typing import Optional, Sequence
 
@@ -11,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.models.call_log import CallLog
 from app.models.callback_schedule import CallbackSchedule
-from app.models.patient import Patient
+from app.models.patient import PATIENT_TYPE_CHRONIC, Patient
 from app.models.plan import Plan
 from app.prompts.common_prompts import CALLBACK_OPENING, CALLBACK_OPENING_NO_NAME
 from app.prompts.inbound_prompts import (
@@ -19,10 +20,14 @@ from app.prompts.inbound_prompts import (
     CALLER_HINT_PATIENT,
     CALLER_HINT_UNKNOWN,
     CARE_PLAN_BLOCK,
+    CHRONIC_TEXT_NO,
+    CHRONIC_TEXT_YES,
     LIVE_CALL_SITUATION,
     RECEPTIONIST_CALLBACK_SITUATION,
     RECEPTIONIST_OPENING,
+    RECEPTIONIST_OPENING_KNOWN,
     RECEPTIONIST_PROMPT,
+    RETURNING_CALLER_NOTE,
 )
 from app.services.agent.context_shared import (
     CAP_BOOK,
@@ -37,6 +42,7 @@ from app.services.agent.context_shared import (
     one_line,
     patient_condition_names,
     previous_conversations,
+    recent_calls_from_caller,
     recording_line,
     red_flag_lines,
     shared_rules,
@@ -96,9 +102,15 @@ async def build_receptionist_prompt(
     """The receptionist prompt (without the shared rules)."""
     conditions = await patient_condition_names(db, patient.id) if patient else []
     if patient:
+        if patient.patient_type == PATIENT_TYPE_CHRONIC or conditions:
+            reported = patient.chronic_conditions_reported
+            chronic_text = CHRONIC_TEXT_YES.format(reported=f" (they mentioned: {reported})" if reported else "")
+        else:
+            chronic_text = CHRONIC_TEXT_NO
         caller_hint = CALLER_HINT_PATIENT.format(
             full_name=full_name(patient),
             followed_for=f", followed for {', '.join(conditions)}" if conditions else "",
+            chronic_text=chronic_text,
         )
     elif caller_name:
         caller_hint = CALLER_HINT_NAMED.format(caller_name=caller_name)
@@ -120,12 +132,23 @@ async def build_receptionist_prompt(
 async def build_inbound_context(
     db: AsyncSession, call: CallLog, patient: Optional[Patient], plan: Optional[Plan]
 ) -> CallContext:
-    """Someone phoned the clinic number (a real phone or the browser 'Call the Agent' page)."""
-    prompt = await build_receptionist_prompt(db, call.phone_number or "", patient, plan, LIVE_CALL_SITUATION)
-    greeting = one_line(RECEPTIONIST_OPENING.format(
+    """Someone phoned the clinic number (a real phone or the browser 'Call the Agent' page).
+
+    A returning caller (known patient or a number we have spoken with before) gets their recent
+    conversations in the prompt, so the agent remembers them once they confirm who they are.
+    """
+    calls = await recent_calls_from_caller(db, call, patient)
+    name = full_name(patient) or next((c.patient_name for c in reversed(calls) if c.patient_name), None)
+    prompt = await build_receptionist_prompt(
+        db, call.phone_number or "", patient, plan, LIVE_CALL_SITUATION, caller_name=name
+    )
+    if calls:
+        prompt += RETURNING_CALLER_NOTE + await previous_conversations(db, calls, name)
+    greeting = one_line((RECEPTIONIST_OPENING_KNOWN if patient else RECEPTIONIST_OPENING).format(
         org_name=settings.clinic_name,
         agent_name=settings.clinic_agent_name,
         recording_line=recording_line(call),
+        full_name=full_name(patient) or "",
     ))
     return CallContext(
         system_prompt=prompt + shared_rules(),

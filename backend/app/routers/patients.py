@@ -1,6 +1,7 @@
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Literal, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -17,6 +18,7 @@ class PatientCreate(BaseModel):
     last_name: str
     phone_number: str
     preferred_language: str = "en"
+    patient_type: Literal["chronic", "normal"] = "normal"
 
 
 class PatientUpdate(BaseModel):
@@ -25,6 +27,7 @@ class PatientUpdate(BaseModel):
     phone_number: Optional[str] = None
     preferred_language: Optional[str] = None
     status: Optional[str] = None
+    patient_type: Optional[Literal["chronic", "normal"]] = None
 
 
 class PatientResponse(BaseModel):
@@ -35,6 +38,11 @@ class PatientResponse(BaseModel):
     phone_number: str
     preferred_language: str
     status: str
+    patient_type: str = "normal"  # chronic | normal
+    chronic_conditions_reported: Optional[str] = None
+    # Set for patients enrolled in chronic care; empty for callers added by the agent
+    enrolled_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -45,7 +53,8 @@ async def list_patients(
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(Patient).limit(100))
+    # Newest first, so callers just added by the agent show at the top
+    result = await db.execute(select(Patient).order_by(Patient.id.desc()).limit(100))
     patients = result.scalars().all()
     return patients
 

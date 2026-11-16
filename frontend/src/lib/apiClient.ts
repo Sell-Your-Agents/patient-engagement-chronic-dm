@@ -212,6 +212,7 @@ class ApiClient {
     phone_number?: string
     preferred_language?: string
     status?: string
+    patient_type?: 'chronic' | 'normal'
   }) {
     const response = await this.client.patch(`/patients/${id}`, data)
     return response.data

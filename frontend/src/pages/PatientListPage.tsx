@@ -1,164 +1,295 @@
-import { useState } from 'react'
-import { useNavigate } from '@tanstack/react-router'
-import { useInitiateCall } from '../hooks/usePatients'
-import { usePatientRoster, careTone, type CareStatus } from '../hooks/usePatientRoster'
-import { Icon } from '../components/Icon'
-import { PageHeader, Kpi, Loader, ErrorState, EmptyState, Avatar, Spinner, friendlyTime, paginate, Pagination } from '../components/ui'
-import { PatientFormModal } from '../components/PatientForm'
-import { toast, errorText } from '../components/toast'
+import { useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import {
+  useInitiateCall,
+  type Patient,
+  type PatientType,
+} from "../hooks/usePatients";
+import {
+  usePatientRoster,
+  careTone,
+  type CareStatus,
+} from "../hooks/usePatientRoster";
+import { Icon } from "../components/Icon";
+import {
+  PageHeader,
+  Kpi,
+  Loader,
+  ErrorState,
+  EmptyState,
+  Avatar,
+  Spinner,
+  friendlyTime,
+  paginate,
+  Pagination,
+} from "../components/ui";
+import { PatientFormModal } from "../components/PatientForm";
+import { toast, errorText } from "../components/toast";
 
-const FILTERS: (CareStatus | 'All')[] = ['All', 'Stable', 'Needs review', 'Escalated', 'Inactive']
+/** Chronic / Normal pill for the patient type; hover shows the conditions the patient mentioned. */
+export function PatientTypeBadge({ patient }: { patient: Patient }) {
+  return patient.patient_type === "chronic" ? (
+    <span
+      className="pill warn"
+      title={patient.chronic_conditions_reported || undefined}
+    >
+      Chronic
+    </span>
+  ) : (
+    <span className="pill mute">Normal</span>
+  );
+}
+
+const FILTERS: (CareStatus | "All")[] = [
+  "All",
+  "Stable",
+  "Needs review",
+  "Escalated",
+  "Inactive",
+];
 
 export function PatientListPage() {
-  const navigate = useNavigate()
-  const { rows, isLoading, error, refetch } = usePatientRoster()
-  const { mutate: initiateCall } = useInitiateCall()
-  const [filter, setFilter] = useState<CareStatus | 'All'>('All')
-  const [q, setQ] = useState('')
-  const [page, setPage] = useState(1)
-  const [calling, setCalling] = useState<number | null>(null)
-  const [adding, setAdding] = useState(false)
+  const navigate = useNavigate();
+  const { rows, isLoading, error, refetch } = usePatientRoster();
+  const { mutate: initiateCall } = useInitiateCall();
+  const [filter, setFilter] = useState<CareStatus | "All">("All");
+  const [q, setQ] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | PatientType>("all");
+  const [page, setPage] = useState(1);
+  const [calling, setCalling] = useState<number | null>(null);
+  const [adding, setAdding] = useState(false);
 
-  if (isLoading) return <Loader text="Loading patients…" />
-  if (error) return <ErrorState text="Could not load patients" onRetry={() => refetch()} />
+  if (isLoading) return <Loader text="Loading patients…" />;
+  if (error)
+    return (
+      <ErrorState text="Could not load patients" onRetry={() => refetch()} />
+    );
 
-  const count = (s: CareStatus) => rows.filter((r) => r.status === s).length
-  const term = q.trim().toLowerCase()
-  const list = rows.filter(
+  const open = (id: number) =>
+    navigate({ to: "/patients/$id", params: { id: String(id) } });
+
+  const activeCount = rows.filter((r) => r.patient.status === "active").length;
+  const chronicCount = rows.filter(
+    (r) => r.patient.patient_type === "chronic",
+  ).length;
+  const newCallerCount = rows.filter((r) => !r.patient.enrolled_at).length;
+  const attentionCount = rows.filter(
+    (r) => r.status === "Escalated" || r.status === "Needs review",
+  ).length;
+
+  const query = q.trim().toLowerCase();
+  const filtered = rows.filter(
     (r) =>
-      (filter === 'All' || r.status === filter) &&
-      (!term || r.name.toLowerCase().includes(term) || r.patient.mrn.toLowerCase().includes(term) || r.patient.phone_number.includes(term)),
-  )
-  const paged = paginate(list, page, setPage, 10)
-  const open = (id: number) => navigate({ to: '/patients/$id', params: { id: String(id) } })
+      (filter === "All" || r.status === filter) &&
+      (typeFilter === "all" || r.patient.patient_type === typeFilter) &&
+      (!query ||
+        r.name.toLowerCase().includes(query) ||
+        r.patient.mrn.toLowerCase().includes(query) ||
+        r.patient.phone_number.includes(query)),
+  );
+  const paged = paginate(filtered, page, setPage, 7);
 
-  const call = (id: number, name: string) => {
-    setCalling(id)
+  const startCall = (id: number, name: string) => {
+    setCalling(id);
     initiateCall(
       { patient_id: id },
       {
-        onSuccess: () => toast.success('Calling now', `The agent is calling ${name}`),
-        onError: (err) => toast.error(`Could not call ${name}`, errorText(err, 'Please try again.')),
+        onSuccess: () =>
+          toast.success("Calling now", `The agent is calling ${name}`),
+        onError: (err) =>
+          toast.error(
+            `Could not call ${name}`,
+            errorText(err, "Please try again."),
+          ),
         onSettled: () => setCalling(null),
       },
-    )
-  }
+    );
+  };
 
   return (
     <div>
       <PageHeader
         title="Patients"
-        subtitle={`${rows.length} enrolled patients · click a row to open the patient dashboard`}
+        subtitle="Manage enrolled patients and start outreach calls."
         actions={
-          <>
-            <div className="relative">
-              <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
-              <input
-                className="field !h-9 !w-60 !pl-9"
-                placeholder="Filter by name, MRN or phone"
-                value={q}
-                onChange={(e) => {
-                  setQ(e.target.value)
-                  setPage(1)
-                }}
-              />
-            </div>
-            <button className="btn p !h-9" onClick={() => setAdding(true)}>
-              <Icon name="plus" className="h-4 w-4" /> Add patient
-            </button>
-          </>
+          <button onClick={() => setAdding(true)} className="btn p">
+            <Icon name="plus" className="h-4 w-4" /> Add patient
+          </button>
         }
       />
 
+      {/* Stats */}
       <div className="grid g4 mb-3.5">
-        <Kpi label="Total patients" value={rows.length} hint={`${rows.filter((r) => r.patient.status === 'active').length} active`} icon="users" tone="a" />
-        <Kpi label="Stable" value={count('Stable')} hint="Within targets" icon="checkCircle" tone="ok" />
-        <Kpi label="Needs review" value={count('Needs review')} hint="Missed doses or warning signs" icon="clock" tone="warn" />
-        <Kpi label="Escalated" value={count('Escalated')} valueTone={count('Escalated') ? 'bad' : undefined} hint="With a clinician" icon="alert" tone="bad" />
+        <Kpi
+          label="Total patients"
+          value={rows.length}
+          hint={`${newCallerCount} added from inbound calls`}
+          icon="users"
+          tone="a"
+        />
+        <Kpi
+          label="Active"
+          value={activeCount}
+          hint={`${rows.length - activeCount} inactive · open to outreach`}
+          icon="activity"
+          tone="ok"
+        />
+        <Kpi
+          label="Chronic patients"
+          value={chronicCount}
+          hint={`${rows.length - chronicCount} normal · long-term care`}
+          icon="heart"
+          tone="violet"
+        />
+        <Kpi
+          label="Need attention"
+          value={attentionCount}
+          valueTone={attentionCount ? "bad" : undefined}
+          hint="Escalated or needs review"
+          icon="alert"
+          tone="bad"
+        />
       </div>
 
-      <div className="tabs mb-3">
-        {FILTERS.map((f) => (
-          <button
-            key={f}
-            className={`tab ${filter === f ? 'on' : ''}`}
-            onClick={() => {
-              setFilter(f)
-              setPage(1)
-            }}
-          >
-            {f}
-            <span className="c">{f === 'All' ? rows.length : count(f)}</span>
-          </button>
-        ))}
-      </div>
-
+      {/* Patient List */}
       <div className="card">
-        {/* Fits the page width: less important columns drop out on narrow screens instead of scrolling sideways */}
-        <table className="t">
-          <thead>
-            <tr>
-              <th>Patient</th>
-              <th>Condition</th>
-              <th className="hidden xl:table-cell">Consulting doctor</th>
-              <th>Status</th>
-              <th className="hidden 2xl:table-cell">Last call</th>
-              <th className="hidden xl:table-cell">Next check-in</th>
-              <th className="text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paged.pageItems.map((r) => (
-              <tr key={r.patient.id} className="rowbtn" onClick={() => open(r.patient.id)}>
-                <td>
-                  <div className="who">
-                    <Avatar name={r.name} />
-                    <div className="min-w-0">
-                      <b className="truncate">{r.name}</b>
-                      <small>
-                        {r.patient.mrn} · {r.patient.phone_number}
-                      </small>
-                    </div>
-                  </div>
-                </td>
-                <td>
-                  {r.primaryPlan ? (
-                    <>
-                      <b className="block">{r.primaryPlan.condition}</b>
-                      <small className="capitalize text-ink-muted">
-                        {r.primaryPlan.severity || '—'}
-                        {r.plans.length > 1 ? ` · +${r.plans.length - 1} more` : ''}
-                      </small>
-                    </>
-                  ) : (
-                    <span className="text-ink-muted">No care plan</span>
-                  )}
-                </td>
-                <td className="hidden xl:table-cell">{r.primaryPlan?.assigned_physician_name || <span className="text-ink-muted">—</span>}</td>
-                <td>
-                  <span className={`pill ${careTone(r.status)} dotted`}>{r.status}</span>
-                </td>
-                <td className="hidden whitespace-nowrap text-ink-soft 2xl:table-cell">{r.lastCall ? friendlyTime(r.lastCall.started_at || r.lastCall.created_at, true) : '—'}</td>
-                <td className="hidden whitespace-nowrap xl:table-cell">{r.primaryPlan ? friendlyTime(r.primaryPlan.next_due_date, true) : '—'}</td>
-                <td onClick={(e) => e.stopPropagation()}>
-                  <div className="flex justify-end gap-1.5">
-                    <button className="btn sm p" disabled={calling === r.patient.id} onClick={() => call(r.patient.id, r.name)}>
-                      {calling === r.patient.id ? <Spinner /> : <Icon name="phone" className="h-3.5 w-3.5" />} Call
-                    </button>
-                    <button className="btn sm" onClick={() => open(r.patient.id)}>
-                      View
-                    </button>
-                  </div>
-                </td>
-              </tr>
+        <div className="card-h flex-wrap">
+          <div className="tabs">
+            {FILTERS.map((f) => (
+              <button
+                key={f}
+                onClick={() => {
+                  setFilter(f);
+                  setPage(1);
+                }}
+                className={`tab ${filter === f ? "on" : ""}`}
+              >
+                {f}{" "}
+                <span className="c">
+                  {f === "All"
+                    ? rows.length
+                    : rows.filter((r) => r.status === f).length}
+                </span>
+              </button>
             ))}
-          </tbody>
-        </table>
-        {list.length === 0 && <EmptyState icon="users" text="No patients match this filter." />}
+          </div>
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <select
+              value={typeFilter}
+              onChange={(e) => {
+                setTypeFilter(e.target.value as "all" | PatientType);
+                setPage(1);
+              }}
+              className="field !h-[42px] !w-auto font-bold"
+              aria-label="Filter by patient type"
+            >
+              <option value="all">All types</option>
+              <option value="chronic">Chronic</option>
+              <option value="normal">Normal</option>
+            </select>
+            <div className="search !pr-0">
+              <Icon name="search" className="h-4 w-4" />
+              <input
+                value={q}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search name, MRN or phone"
+                className="!pr-3"
+              />
+            </div>
+          </div>
+        </div>
+        <div className="scroll">
+          <table className="t">
+            <thead>
+              <tr>
+                <th>Patient</th>
+                <th>MRN</th>
+                <th>Type</th>
+                <th>Care status</th>
+                <th>Last call</th>
+                <th className="!text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paged.pageItems.map((r) => {
+                const p = r.patient;
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <div className="who">
+                        <Avatar name={r.name} />
+                        <div className="min-w-0">
+                          <b className="flex items-center gap-2">
+                            {r.name}
+                            {!p.enrolled_at && (
+                              <span
+                                className="pill info"
+                                title="Added automatically when they phoned the clinic"
+                              >
+                                New caller
+                              </span>
+                            )}
+                          </b>
+                          <small>{p.phone_number}</small>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="mono text-ink-soft">{p.mrn}</td>
+                    <td>
+                      <PatientTypeBadge patient={p} />
+                    </td>
+                    <td>
+                      <span className={`pill ${careTone(r.status)} dotted`}>
+                        {r.status}
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap text-ink-soft">
+                      {friendlyTime(
+                        r.lastCall?.started_at || r.lastCall?.created_at,
+                      )}
+                    </td>
+                    <td>
+                      <div className="flex justify-center gap-1.5">
+                        <button
+                          onClick={() => startCall(p.id, r.name)}
+                          disabled={calling !== null}
+                          title="Call patient"
+                          className="btn sm p"
+                        >
+                          {calling === p.id ? (
+                            <Spinner />
+                          ) : (
+                            <Icon name="phoneCall" className="h-4 w-4" />
+                          )}
+                          {calling === p.id ? "Calling…" : "Call"}
+                        </button>
+                        <button onClick={() => open(p.id)} className="btn sm">
+                          View <Icon name="chevronRight" className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {filtered.length === 0 && (
+            <EmptyState icon="users" text="No patients found" />
+          )}
+        </div>
         <Pagination paged={paged} noun="patients" />
       </div>
 
-      {adding && <PatientFormModal open onClose={() => setAdding(false)} onSaved={(p) => p?.id && open(p.id)} />}
+      {adding && (
+        <PatientFormModal
+          open
+          onClose={() => setAdding(false)}
+          onSaved={(p) => p?.id && open(p.id)}
+        />
+      )}
     </div>
-  )
+  );
 }

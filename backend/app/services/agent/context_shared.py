@@ -180,9 +180,9 @@ def caller_identity_rules(name: Optional[str]) -> str:
 # ---------- Lookups ----------
 
 async def lookup_caller(db: AsyncSession, phone_number: str) -> Optional[Patient]:
-    """Find the chronic-care patient who owns this number (matched on the last 10 digits)."""
-    digits = re.sub(r"\D", "", phone_number or "")[-10:]
-    if len(digits) < 10:
+    """Find the patient who owns this number (matched on the last 10 digits)."""
+    digits = phone_digits(phone_number)
+    if not digits:
         return None
     result = await db.execute(
         select(Patient)
@@ -270,6 +270,39 @@ async def earlier_calls(db: AsyncSession, callback: CallbackSchedule) -> List[Ca
         current = await find_callback_for_call(db, source.id)  # was that call a callback too?
     calls.reverse()
     return calls
+
+
+def phone_digits(phone_number: Optional[str]) -> Optional[str]:
+    """Last 10 digits of a phone number (how numbers are matched), or None if it is too short."""
+    digits = re.sub(r"\D", "", phone_number or "")[-10:]
+    return digits if len(digits) == 10 else None
+
+
+async def recent_calls_from_caller(db: AsyncSession, call: CallLog, patient: Optional[Patient]) -> List[CallLog]:
+    """Earlier finished calls with this patient or phone number (not this call), oldest first.
+
+    Lets a live inbound call remember what the caller talked about before.
+    """
+    matches = []
+    if patient:
+        matches.append(CallLog.patient_id == patient.id)
+    digits = phone_digits(call.phone_number)
+    if digits:
+        matches.append(CallLog.phone_number.like(f"%{digits}"))
+    if not matches:
+        return []
+    result = await db.execute(
+        select(CallLog)
+        .where(
+            or_(*matches),
+            CallLog.id != call.id,
+            CallLog.status == "completed",
+            or_(CallLog.transcript.isnot(None), CallLog.summary.isnot(None)),
+        )
+        .order_by(CallLog.id.desc())
+        .limit(HISTORY_MAX_CALLS)
+    )
+    return list(reversed(result.scalars().all()))
 
 
 async def previous_conversations(db: AsyncSession, calls: Sequence[CallLog], who: Optional[str]) -> str:

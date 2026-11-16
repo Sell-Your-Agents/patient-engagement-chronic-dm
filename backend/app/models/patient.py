@@ -4,6 +4,10 @@ from sqlalchemy import String, DateTime, Text, Boolean, Date
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
+PATIENT_TYPE_CHRONIC = "chronic"
+PATIENT_TYPE_NORMAL = "normal"
+PATIENT_TYPES = (PATIENT_TYPE_CHRONIC, PATIENT_TYPE_NORMAL)
+
 
 class Patient(Base):
     __tablename__ = "patients"
@@ -23,6 +27,11 @@ class Patient(Base):
     communication_consent: Mapped[bool] = mapped_column(Boolean, default=True)
     consent_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="active")
+    # "chronic": has a long-term condition (enrolled with a condition, or a caller who said they have
+    # one). "normal": everyone else. Staff can change it on the patient page.
+    patient_type: Mapped[str] = mapped_column(String(10), default=PATIENT_TYPE_NORMAL, index=True)
+    # Chronic conditions the patient mentioned on a call (e.g. "diabetes, high blood pressure")
+    chronic_conditions_reported: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     enrolled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
