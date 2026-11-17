@@ -1,15 +1,12 @@
-import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import init_db, get_db
+from app.database import init_db
 from app.config import get_settings
 
 settings = get_settings()
@@ -38,36 +35,21 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
-    # Demo doctors shared by both agents (only inserted once)
     from app.database import AsyncSessionLocal
-    from app.services.scheduling.clinic_scheduling import seed_clinic_doctors
-
-    async with AsyncSessionLocal() as db:
-        await seed_clinic_doctors(db)
-
-    # Calls left "live" by a restart (their audio stream died with the old process)
+    from app.knowledge.clinic_seed import seed_clinic_data
     from app.services.agent.call_cleanup import close_stale_calls
 
+    # Demo doctor schedules and knowledge base (only inserted into empty tables)
+    async with AsyncSessionLocal() as db:
+        await seed_clinic_data(db)
+
+    # Calls left "live" by a restart (their audio stream died with the old process)
     async with AsyncSessionLocal() as db:
         closed = await close_stale_calls(db, browser_only_any_age=True)
         if closed:
             logger.info(f"Closed {closed} call(s) left in progress by a previous run")
 
-    # Call people back when the callback they asked for falls due
-    from app.services.scheduling.callback_service import run_callback_dialer
-
-    callback_dialer = asyncio.create_task(run_callback_dialer())
-
-    # Health check-in calls when a care plan's follow-up interval comes round
-    from app.services.scheduling.checkin_dialer import run_checkin_dialer
-
-    checkin_dialer = asyncio.create_task(run_checkin_dialer()) if settings.checkin_dialer_enabled else None
-
     yield
-
-    callback_dialer.cancel()
-    if checkin_dialer:
-        checkin_dialer.cancel()
 
     # Shutdown
     logger.info("Application shutting down...")
@@ -75,7 +57,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    description="Agentic AI for proactive patient engagement in chronic disease management",
+    description="AI calling agent for clinics: answers calls, records appointment requests and callbacks",
     version="1.0.0",
     lifespan=lifespan,
     root_path=settings.root_path,
@@ -123,11 +105,9 @@ async def log_requests(request: Request, call_next):
 from app.routers import (
     auth,
     patients,
-    conditions,
-    plans,
     calls,
+    followups,
     twilio_webhook,
-    escalations,
     appointments,
     analytics,
     clinic,
@@ -139,11 +119,9 @@ from app.routers import (
 
 app.include_router(auth.router)
 app.include_router(patients.router)
-app.include_router(conditions.router)
-app.include_router(plans.router)
 app.include_router(calls.router)
+app.include_router(followups.router)
 app.include_router(twilio_webhook.router)
-app.include_router(escalations.router)
 app.include_router(appointments.router)
 app.include_router(analytics.router)
 app.include_router(clinic.router)
@@ -156,36 +134,11 @@ app.include_router(notifications.router)
 @app.get("/", include_in_schema=False)
 async def root():
     return {
-        "message": "Patient Engagement for Chronic Disease Management API",
+        "message": f"{settings.app_name} API",
         "docs": "/docs",
     }
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "patient-engagement-api"}
-
-
-@app.get("/api/debug/users", include_in_schema=False)
-async def debug_users(db: AsyncSession = Depends(get_db)):
-    from app.models.user import User
-    result = await db.execute(select(User))
-    users = result.scalars().all()
-    return {
-        "user_count": len(users),
-        "users": [{"id": u.id, "email": u.email, "is_active": u.is_active} for u in users]
-    }
-
-
-@app.get("/api/debug/plans", include_in_schema=False)
-async def debug_plans(db: AsyncSession = Depends(get_db)):
-    from app.models.plan import Plan
-    from app.models.patient import Patient
-    result = await db.execute(select(Plan))
-    plans = result.scalars().all()
-    return {
-        "plan_count": len(plans),
-        "plans": [
-            {"id": p.id, "patient_id": p.patient_id, "status": p.status} for p in plans
-        ]
-    }
+    return {"status": "ok", "service": "clinic-calling-agent-api"}

@@ -4,7 +4,7 @@ import { Icon, type IconName } from './Icon'
 import { usePatients } from '../hooks/usePatients'
 import { useAuthStore } from '../store/authStore'
 import { useThemeStore, resolvedMode } from '../store/themeStore'
-import { openCallbacks, openPalette } from '../lib/nav'
+import { openPalette } from '../lib/nav'
 import { NotificationBell } from './NotificationBell'
 
 /* ------------------------------------------------------------------ */
@@ -117,8 +117,8 @@ type QuickAction = { label: string; hint: string; icon: IconName; tone: Tone; ke
  */
 export function GlobalSearch() {
   const navigate = useNavigate()
-  const { data: patients } = usePatients(0, 100)
   const [q, setQ] = useState('')
+  const { data: patients } = usePatients()
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -130,9 +130,9 @@ export function GlobalSearch() {
   }, [])
 
   const actions: QuickAction[] = [
-    { label: 'Call a patient', hint: 'The agent dials and runs the check-in', icon: 'phone', tone: 'a', key: '2', run: () => navigate({ to: '/patients' }) },
-    { label: 'Appointments', hint: 'Book, confirm or cancel visits', icon: 'calendar', tone: 'violet', key: 'B', run: () => navigate({ to: '/appointments' }) },
-    { label: 'Scheduled callbacks', hint: 'Callers waiting to be called back', icon: 'clock', tone: 'warn', key: 'S', run: () => openCallbacks(navigate) },
+    { label: 'Pending appointment requests', hint: 'Confirm requests the agent recorded', icon: 'calendar', tone: 'violet', key: 'B', run: () => navigate({ to: '/appointments' }) },
+    { label: 'Follow-ups', hint: 'Callers waiting for the clinic to call back', icon: 'clock', tone: 'warn', key: 'F', run: () => navigate({ to: '/follow-ups' }) },
+    { label: 'Talk to the agent', hint: 'Test call from this browser', icon: 'phone', tone: 'a', key: '9', run: () => navigate({ to: '/call-agent' }) },
     { label: 'Command palette', hint: 'Jump anywhere, run actions', icon: 'terminal', tone: 'mute', key: 'Ctrl K', run: openPalette },
   ]
 
@@ -141,10 +141,7 @@ export function GlobalSearch() {
     if (!term) return []
     return (patients || [])
       .filter(
-        (p) =>
-          `${p.first_name} ${p.last_name}`.toLowerCase().includes(term) ||
-          p.mrn.toLowerCase().includes(term) ||
-          p.phone_number.replace(/\s/g, '').includes(term.replace(/\s/g, '')),
+        (p) => p.name.toLowerCase().includes(term) || p.phone_number.replace(/\s/g, '').includes(term.replace(/\s/g, '')),
       )
       .slice(0, 6)
   }, [term, patients])
@@ -200,7 +197,7 @@ export function GlobalSearch() {
           } else if (e.key === 'Escape') close()
         }}
         aria-label="Search patients or pick a quick action"
-        placeholder="Search patient, MRN or phone"
+        placeholder="Search patient name or phone"
         autoComplete="off"
       />
       <kbd>/</kbd>
@@ -214,14 +211,10 @@ export function GlobalSearch() {
               ) : (
                 results.map((p, i) => (
                   <button key={p.id} className={i === active ? 'act' : ''} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(i)} onMouseEnter={() => setActive(i)}>
-                    <Avatar name={`${p.first_name} ${p.last_name}`} size={30} />
+                    <Avatar name={p.name} size={30} />
                     <span className="min-w-0">
-                      <b className="block truncate">
-                        {p.first_name} {p.last_name}
-                      </b>
-                      <small className="block truncate text-ink-muted">
-                        {p.mrn} · {p.phone_number}
-                      </small>
+                      <b className="block truncate">{p.name}</b>
+                      <small className="block truncate text-ink-muted">{p.phone_number}</small>
                     </span>
                   </button>
                 ))
@@ -399,6 +392,9 @@ const STATUS: Record<string, { cls: string; label?: string }> = {
   confirmed: { cls: 'ok' },
   active: { cls: 'ok' },
   booked: { cls: 'info' },
+  transferred: { cls: 'violet', label: 'Transferred' },
+  done: { cls: 'ok' },
+  not_applicable: { cls: 'mute', label: 'Not applicable' },
   'in-progress': { cls: 'info', label: 'In progress' },
   in_progress: { cls: 'info', label: 'In progress' },
   initiated: { cls: 'info' },
@@ -623,19 +619,6 @@ export function Modal({ open, onClose, title, subtitle, children }: { open: bool
   )
 }
 
-/** Inbound / outbound label with an arrow icon. */
-export function DirectionLabel({ direction }: { direction: 'inbound' | 'outbound' | string }) {
-  return direction === 'inbound' ? (
-    <span className="inline-flex items-center gap-1.5 font-bold text-info">
-      <Icon name="phoneIncoming" className="h-[15px] w-[15px]" /> Inbound
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1.5 font-bold text-brand">
-      <Icon name="phoneOutgoing" className="h-[15px] w-[15px]" /> Outbound
-    </span>
-  )
-}
-
 /* ------------------------------------------------------------------ */
 /* Formatting                                                         */
 /* ------------------------------------------------------------------ */
@@ -755,9 +738,9 @@ export function Pagination({
       <span>
         Showing <b className="text-ink">{from}–{to}</b> of <b className="text-ink">{total}</b> {noun}
       </span>
-      {totalPages > 1 && (
+      {total > 0 && (
         <span className="flex items-center gap-1.5">
-          <button className="btn sm" onClick={() => setPage(page - 1)} disabled={page === 1} title="Previous">‹</button>
+          <button className="btn sm" onClick={() => setPage(page - 1)} disabled={page === 1}>‹ Previous</button>
           {pages.map((n, i) => (
             <span key={n} className="flex items-center gap-1.5">
               {i > 0 && n - pages[i - 1]! > 1 && <span>…</span>}
@@ -766,7 +749,7 @@ export function Pagination({
               </button>
             </span>
           ))}
-          <button className="btn sm" onClick={() => setPage(page + 1)} disabled={page === totalPages} title="Next">›</button>
+          <button className="btn sm" onClick={() => setPage(page + 1)} disabled={page === totalPages}>Next ›</button>
         </span>
       )}
     </div>

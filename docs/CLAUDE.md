@@ -2,74 +2,104 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## What this is
+
+Zensark's Healthcare AI Calling Agent, configured for the **Six Sigma Clinic** pilot. One AI agent
+(`CLINIC_AGENT_NAME`, "Maya") answers calls to the clinic in **English, Hindi or Telugu**, works out
+what the caller needs, and records it. Workflows follow the clinic's workflow reference:
+
+- **A. Appointment booking**: doctor/specialty, name + contact number, preferred time; the request is
+  stored **pending** ("Pending confirmation"). The agent never says an appointment is booked unless a
+  connected clinic system confirms it (none is connected: `APPOINTMENT_INTEGRATION=none`).
+- **B. Doctor / specialty enquiry** and **C. clinic timings / services**: answered only from the
+  Doctors table and the Clinic Knowledge base. The agent must not invent doctors, timings, fees or services.
+- **D. Missed call / callback**: a staff follow-up. The agent never dials anyone.
+- **E. Human assistance**: with `HUMAN_TRANSFER_NUMBER` set, the caller hears hold music (conference
+  room) while the front desk rings for `HUMAN_TRANSFER_RING_SECONDS`; answered -> follow-up done,
+  not answered -> busy message in the caller's language (Sarvam audio) and the follow-up stays open
+  (`services/voice/telephony.py`, `routers/clinic_twilio.py` /hold, /busy-audio, /transfer-status).
+  Without a number, a follow-up only.
+- Questions the agent cannot answer from the prompt: `[[UNANSWERED_QUESTION ...]]` follow-up.
+- Emergencies: advice to call 108 plus an urgent follow-up.
+
+Everything staff must act on is ONE list, `follow_ups` (kinds emergency, distress, human_assistance,
+unanswered_question, callback, confirm_appointment, staff; priority urgent/high/normal).
+
+There are no outbound calls, chronic-care plans, check-ins or auto-callbacks (removed).
+
 ## Commands
 
-There is no test suite or linter configured. `test_call.py` (repo root) is a manual script that simulates Twilio WebSocket events against the local DB; it is not pytest. Frontend type-checking is `npm run type-check`.
+No test suite or linter. Frontend type-checking is `npm run type-check`.
 
-Backend (`backend/`, Python 3.11, Windows venv):
+Backend (`backend/`, Python 3.11):
 ```powershell
 python -m venv venv
 .\venv\Scripts\pip.exe install -r requirements.txt
-copy .env.example .env            # JWT_SECRET_KEY is the only required setting
-.\venv\Scripts\python.exe seed.py # creates tables + demo user, conditions, protocols, patients
+copy .env.example .env            # JWT_SECRET_KEY and DATABASE_URL are required
+.\venv\Scripts\python.exe seed.py # creates tables, demo user, demo doctors + knowledge base
 .\venv\Scripts\python.exe run.py  # uvicorn on :8000 with reload; Swagger at /docs
+.\venv\Scripts\python.exe -m scripts.export_calls --days 7   # call records to CSV
 ```
 
 Frontend (`frontend/`): `npm install`, `npm run dev` (:5173, proxies `/api` to :8000), `npm run build`, `npm run type-check`.
 
-Everything incl. Cloudflare tunnel: `powershell -ExecutionPolicy Bypass -File .\start-all.ps1` (see `SETUP_GUIDE.txt`; `DEPLOYMENT*.md` + `deploy/` cover the dev server).
+Demo login after seeding: `test@hospital.com` / `TestPass123!`.
 
-Demo login after seeding: `test@hospital.com` / `TestPass123!`. To reset the DB, delete `backend/patient_engagement.db` and re-run `seed.py`.
+## Data model
 
-## Architecture
+Tables are created by `Base.metadata.create_all` (startup and `seed.py`); there are no migrations, so
+`DATABASE_URL` must point at a **new, empty database** for this schema. New models must be imported in
+`models/__init__.py`. Clinic datetimes (`start_at`, `follow_up_at`) are naive clinic-local time;
+`created_at` columns are UTC.
 
-FastAPI (async SQLAlchemy 2, SQLite via aiosqlite) backend + React/TS/Vite/Tailwind frontend (TanStack Router/Query, zustand, axios). 
-**One AI phone agent** (`settings.clinic_agent_name`, "Maya") handles every call. The call's `direction` and the caller decide the context it is given:
+- `call_logs` + `call_turns`: one row per call. The "call record" columns (`patient_name`, `phone_number`,
+  `language`, `intent`, `doctor_requested`, `preferred_slot`, `outcome`, `booking_status`, `next_action`)
+  are filled after the call. Shown to staff as `SS-<1000+id>`.
+- `appointments`: `pending | confirmed | cancelled | completed`. `pending`/`confirmed` with a `start_at`
+  hold the doctor's slot. Staff confirm on the Appointments page (needs doctor + slot).
+- `follow_ups` (`models/callback_schedule.py`): the one staff call-back list (see above);
+  `confirm_appointment` ones close automatically when their appointment is confirmed/cancelled.
+  `transfer_status` records the live-transfer result. (An `assistance_requests` table from an
+  earlier version may exist in a database; it is no longer used.)
+- `patients`: callers, created/linked by phone number after a call once a name is known.
+- `doctors`, `clinic_knowledge`: clinic-specific configuration, edited in the UI; demo rows come from
+  `app/knowledge/clinic_seed.py` (inserted into empty tables only).
 
-- **outbound** — chronic-care health check-in for an enrolled patient (diabetes/HTN/COPD/asthma), built from their disease protocol.
-- **inbound** — patients call the clinic number; the agent answers as receptionist, picks a doctor and books a slot mid-call.
-- **inbound from an enrolled patient** (last 10 digits of the number match a `patients` row) — receptionist that also knows the care plan and its red flags (`call_logs.plan_id` is set).
+## Live call pipeline
 
-One set of tables serves all of it:
-- `call_logs` + `call_turns` (`models/call_log.py`) — every call, told apart by `direction` (inbound/outbound). `patient_id` is nullable (unknown inbound callers); care-plan and extracted-summary columns are nullable.
-- `appointments` (`models/appointment.py`) — `source` agent/staff. Booked-in-call and staff bookings start `booked`; a visit requested after a check-in starts `requested` and staff confirm. `doctor_id` links to `doctors`; `start_at` is null for a request with no time yet. Slots are held by statuses in `ACTIVE_STATUSES`, so nothing can double-book a doctor.
-- `doctors` (`models/doctor.py`) — schedules used for in-call booking and for chronic-care availability/booking (matched to `plans.assigned_physician_name` by name).
-- `escalations` — `call_log_id` points at any call; `patient_id` nullable. Raised live by `[[ESCALATE]]`, or after the call for red flags / `urgent`/`emergency` callers (at most one per call from the finalizer).
+Phone: Twilio number webhook `POST {API_BASE_URL}/twilio/clinic/inbound` → creates the `CallLog` and opens a
+Media Stream to `/twilio/stream/{sid}`. Browser: "Call the Agent" page, either Twilio Voice SDK (same webhook,
+`routers/browser_call.py`) or the direct websocket `routers/sim_call.py` (no Twilio). All land in
+`services/agent/call_agent.py::run_call_stream`.
 
-API: `/api/calls` is the single call API (`routers/calls.py`): `GET /` and `GET /stats` take `?direction=inbound|outbound`, `POST /` dials a patient (outbound), `GET /{id}` returns the call with its turns. `/api/appointments` is likewise the only appointments API (`GET /` filters by `patient_id`, `doctor_id`, `status`, `source`, dates; `POST /book` is a staff booking into a doctor's slot). `/api/clinic` only has `info`, `stats` and `doctors`.
+`CallAgentSession` (subclass of `services/voice/twilio_service.py::CallSession`): μ-law audio → Deepgram STT
+(`services/voice/stt_service.py`) → Claude streaming (`claude_service.py`) sentence by sentence → Sarvam TTS,
+with barge-in. The greeting is spoken in three parts (English, Hindi, Telugu voices). Until the caller picks a
+language, STT uses Deepgram's multilingual Hindi+English model; `[[SET_LANGUAGE:xx]]` switches the voice
+(`selected_digit`) and reconnects STT for that language (`LANGUAGE_DIGITS` in `context_shared.py`:
+te=1, hi=2, en=3).
 
-UI: sidebar is Dashboard, Patients, Doctors, Call Logs, Appointments, Escalations; Call Logs and Appointments are single pages with direction/status/source filters.
+After hangup `call_finalizer.finalize_call` makes one Claude (Haiku) call (`CALL_SUMMARY_PROMPT`) for the
+call record, upserts the patient, and adds safety-net rows (appointment request / follow-up / assistance) if
+the agent missed writing a token.
 
-### Live call pipeline
-Outbound: staff click in UI → router creates a `CallLog` row (direction=outbound) and uses the Twilio REST API → Twilio POSTs `/twilio/twiml`, signature-validated → TwiML opens a Media Stream WebSocket.
-Inbound: the Twilio number's Voice webhook is set to `{API_BASE_URL}/twilio/clinic/inbound` (POST) → the route creates the `CallLog` (direction=inbound) and opens the same WebSocket. Optionally set the number's "Call status changes" URL to `/twilio/clinic/status` (outbound uses `/twilio/status`; both share `apply_call_status`).
+### Prompts and tokens
+- `prompts/inbound_prompts.py`: opening lines + receptionist prompt (workflows A to E, doctor list with free
+  slots, knowledge base), filled by `services/agent/inbound_context.py`.
+- `prompts/common_prompts.py`: shared rules (no invented facts, emergencies, language, style) + summary prompt.
 
-Both directions land on **one** WebSocket, `/twilio/stream/{sid}` → `services/agent/call_agent.py::run_call_stream`, which loads the `Call`, asks `services/agent/call_context.py::build_call_context` for the prompt, greeting and capabilities, and runs `CallAgentSession` (subclass of `services/voice/twilio_service.py::CallSession`): μ-law audio → Deepgram STT (`services/voice/stt_service.py`; class is misleadingly named `SarvamStream`) → Claude streaming (`services/agent/claude_service.py`) sentence-by-sentence → Sarvam TTS → frames back to Twilio, with barge-in cancellation. After hangup, `services/agent/call_finalizer.py::finalize_call` makes one Claude (Haiku) call with a single summary schema (`claude_service.finalize_call_summary`) for every call, which drives escalations, appointment requests and (outbound only) care-plan rescheduling.
+Tokens (stripped from audio, acted on in `call_agent.py`): `[[SET_LANGUAGE:en|hi|te]]`,
+`[[APPOINTMENT_REQUEST name=..; phone=..|caller; doctor_id=..; doctor=..; preferred=..; slot=..; reason=..]]`
+(`appointment_service.record_appointment_request`; repeating it in the same call updates the request),
+`[[CALLBACK_REQUEST ...]]`, `[[UNANSWERED_QUESTION question=..]]`, `[[HUMAN_ASSISTANCE reason=..]]`, `[[ESCALATE:emergency|distress]]`, `[[END_CALL]]`.
 
-Twilio must reach the backend, so `API_BASE_URL` must be a public https URL (Cloudflare tunnel; `start-all.ps1` rewrites it in `.env`). `services/public_url.py` rebuilds the public URL for signature validation behind a proxy. `ROOT_PATH` / `VITE_BASE_PATH` / `VITE_API_BASE` handle the `/patientpulse` prefix on the dev server (`frontend/.env.production`); locally they are empty.
+### Appointment integration
+`services/scheduling/appointment_service.py` has an `AppointmentProvider` interface. Add a provider for a
+clinic MIS/CRM/appointment API whose `book()` returns `confirmed=True` only after a successful booking; with
+none, every request is pending and a `confirm_appointment` follow-up is created.
 
-### Prompts, capabilities and control tokens
-Claude is steered by in-band `[[TOKENS]]` that `CallAgentSession` strips from audio and acts on, but only if the call's context grants the capability (`CAP_*` in `services/agent/context_shared.py`); other tokens are stripped and ignored.
+## Auth
+JWT bearer on all `/api/*` routes except login/register/refresh. Twilio webhooks use signature validation.
 
-Prompt text is split by direction, and the context builders are split the same way:
-- `prompts/common_prompts.py`: rules every call gets (identity, emergencies, medicines, distress, style, ending), clinic facts, callback rules, callback openings, previous-conversation block, after-call summary prompt.
-- `prompts/outbound_prompts.py` + `services/agent/outbound_context.py` (+ `prompts/chronic_prompt.py`, which fills the check-in prompt from a `DiseaseProtocol` row): health check-ins, the no-care-plan fallback, and callbacks after a check-in. Capabilities: `escalate`, `appointment_request`, `callback`.
-- `prompts/inbound_prompts.py` + `services/agent/inbound_context.py`: the receptionist for calls to the clinic number (doctors/free slots queried live, CARE PLAN block only after the caller confirms who they are), and callbacks to people who phoned in. Capabilities: `book`, `escalate`, `callback`.
-- `services/agent/call_context.py::build_call_context` only decides which of these a call uses.
-
-Every call Maya places opens with "Am I speaking with <full name>?" and shares nothing before a clear yes; the recording notice is spoken only when the call is recorded (`CALL_RECORDING_ENABLED`, or the browser page's tick box). Clinical content originates in `app/knowledge/seed_protocols.py`; `seed.py` copies it once. The app never changes an existing database's protocols by itself: `python scripts/sync_protocols.py` shows which new red flags (by id) are missing, and `--apply` writes them (take a backup first; the dev/prod database is RDS). Per-call recording choice for inbound calls is kept in memory (`context_shared.set_inbound_recording`), so no schema change is needed.
-
-Tokens: `[[BOOK_APPOINTMENT doctor_id=..; start=..; name=..; reason=..]]` (books via `clinic_scheduling.book_slot`), `[[ESCALATE:id]]` (creates an escalation immediately, severity from the protocol's red flag), `[[APPOINTMENT_REQUESTED]]`, `[[SCHEDULE_CALLBACK when=..; reason=..]]` (rejected with `[[CALLBACK_FAILED ...]]` if the time is invalid or outside calling hours), `[[END_CALL]]` (handled by `CallSession`).
-
-Browser calling: the "Call the Agent" page (`frontend/src/pages/CallAgentPage.tsx`, Twilio Voice SDK) gets a token from `routers/browser_call.py` and dials a TwiML App whose Voice URL is `/twilio/clinic/inbound`, so it takes the same path as a real call to the clinic number.
-
-### Data: static vs runtime
-Static/seeded: disease protocols and conditions (`seed.py`), the 6 `DEMO_DOCTORS` (`services/scheduling/clinic_scheduling.py`, auto-seeded in the FastAPI lifespan if the table is empty). Chronic-care availability uses the real doctor schedule when the care plan's physician matches a doctor by name (seed uses "Dr. Ananya Rao"), otherwise mock slots in `appointment_service.py`. Everything else is runtime data. Tables are created by `Base.metadata.create_all` at startup; there are no migrations, so schema changes to an existing SQLite DB require manual handling or a reset. New models must be imported in `models/__init__.py`.
-
-Clinic datetimes are naive and in local clinic time (`CLINIC_UTC_OFFSET_MINUTES`); `created_at` columns are UTC.
-
-### Auth
-JWT bearer (`auth/security.py`, `auth/deps.py::get_current_user`) on all `/api/*` routes except login/register. Twilio webhook routes use Twilio signature validation instead. `/api/debug/*` routes in `main.py` are unauthenticated.
-
-## Known issues (verified by reading, not by running)
-- `scheduler_service.run_outreach_scheduler` is never started (commented out in `main.py`); calls only happen via the UI.
+## Not updated
+`render.yaml`, `deploy/` and `docs/DEPLOYMENT.md` still describe the earlier chronic-care deployment.

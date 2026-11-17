@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../lib/apiClient'
 
-export type NotificationGroup = 'clinical' | 'callback' | 'appointment'
-export type NotificationAction = 'acknowledge' | 'call_now' | 'confirm'
+export type NotificationGroup = 'followup' | 'appointment'
+export type NotificationAction = 'done'
 
 export interface AppNotification {
   key: string
   group: NotificationGroup
-  kind: 'escalation' | 'escalation_overdue' | 'callback_due' | 'callback_failed' | 'appointment_request' | string
+  kind: 'followup_overdue' | 'appointment_request' | string
   severity: 'urgent' | 'high' | 'medium' | 'low' | 'info'
   title: string
   body: string

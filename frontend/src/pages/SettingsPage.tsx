@@ -20,7 +20,7 @@ const SHORTCUTS: [string, string][] = [
   ['1 – 9', 'Jump to a page in the sidebar'],
   ['/', 'Search patients'],
   ['Ctrl K', 'Command palette'],
-  ['S', 'Scheduled callbacks'],
+  ['F', 'Follow-ups'],
   ['B', 'Appointments'],
   ['T', 'Toggle dark mode'],
   ['[', 'Collapse / expand sidebar'],

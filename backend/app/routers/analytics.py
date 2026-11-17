@@ -1,200 +1,142 @@
-from fastapi import APIRouter, Depends, Query
-from typing import Dict, List
+"""Dashboard numbers: calls, intents, languages, appointment requests and follow-ups."""
+from collections import Counter
 from datetime import datetime, timedelta
-from sqlalchemy import select, func
+from typing import Dict
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-import logging
 
-from app.database import get_db
 from app.auth.deps import get_current_user
-from app.models.user import User
-from app.models.call_log import CallLog, DIRECTION_OUTBOUND
+from app.config import get_settings
+from app.database import get_db
+from app.models.appointment import STATUS_CONFIRMED, STATUS_PENDING, Appointment
+from app.models.call_log import CallLog
+from app.models.callback_schedule import FOLLOWUP_PENDING, KIND_CONFIRM_APPOINTMENT, PRIORITY_URGENT, FollowUp
 from app.models.patient import Patient
-from app.models.appointment import Appointment
-from app.models.escalation import Escalation
+from app.models.user import User
 
-logger = logging.getLogger(__name__)
+settings = get_settings()
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
 
-@router.get("/kpis", response_model=Dict)
-async def get_kpis(
+def _local(utc: datetime) -> datetime:
+    return utc + timedelta(minutes=settings.clinic_utc_offset_minutes)
+
+
+@router.get("/dashboard")
+async def dashboard(
+    days: int = Query(14, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> Dict:
-    """Get key performance indicators for the program."""
-    logger.info("GET /api/analytics/kpis called")
+    """Everything the dashboard shows, in one request. "Today" and the trend use clinic-local dates."""
+    now_utc = datetime.utcnow()
+    today = _local(now_utc).date()
+    since_utc = datetime.combine(today - timedelta(days=days - 1), datetime.min.time()) - timedelta(
+        minutes=settings.clinic_utc_offset_minutes
+    )
 
-    try:
-        # Total patients enrolled
-        logger.debug("Fetching total patients...")
-        total_patients_result = await db.execute(select(func.count(Patient.id)))
-        total_patients = total_patients_result.scalar() or 0
-        logger.debug(f"Total patients: {total_patients}")
+    async def count(stmt) -> int:
+        return (await db.execute(stmt)).scalar() or 0
 
-        # Active patients (status=active, has consent)
-        logger.debug("Fetching active patients...")
-        active_patients_result = await db.execute(
-            select(func.count(Patient.id)).where(
-                Patient.status == "active",
-                Patient.communication_consent == True,
+    rows = (
+        await db.execute(
+            select(
+                CallLog.created_at, CallLog.intent, CallLog.language, CallLog.booking_status, CallLog.status,
+                CallLog.duration_seconds, CallLog.next_action,
             )
+            .where(CallLog.created_at >= since_utc)
         )
-        active_patients = active_patients_result.scalar() or 0
-        logger.debug(f"Active patients: {active_patients}")
+    ).all()
 
-        # Total outreach calls
-        logger.debug("Fetching total calls...")
-        total_calls_result = await db.execute(select(func.count(CallLog.id)).where(CallLog.direction == DIRECTION_OUTBOUND))
-        total_calls = total_calls_result.scalar() or 0
-        logger.debug(f"Total calls: {total_calls}")
+    trend = {today - timedelta(days=offset): {"calls": 0, "requests": 0} for offset in range(days)}
+    intents: Counter = Counter()
+    languages: Counter = Counter()
+    calls_today = 0
+    durations = []
+    hours: Counter = Counter()
+    conversations = 0  # calls where the caller actually talked to Maya
+    handled_alone = 0  # ...and nothing was left for staff to do
+    transferred = 0
+    for created_at, intent, language, booking_status, status, duration, next_action in rows:
+        hours[_local(created_at).hour] += 1
+        if status == "transferred":
+            transferred += 1
+        if intent and intent != "other" or status == "transferred":
+            conversations += 1
+            if status == "completed" and (next_action in (None, "", "None")) and booking_status in (None, "not_applicable", "confirmed"):
+                handled_alone += 1
+        day = _local(created_at).date()
+        if day in trend:
+            trend[day]["calls"] += 1
+            if booking_status in ("pending", "confirmed"):
+                trend[day]["requests"] += 1
+        if day == today:
+            calls_today += 1
+        if intent:
+            intents[intent] += 1
+        if language:
+            languages[language] += 1
+        if duration and status in ("completed", "transferred"):
+            durations.append(duration)
 
-        # Completed calls
-        logger.debug("Fetching completed calls...")
-        completed_calls_result = await db.execute(
-            select(func.count(CallLog.id)).where(CallLog.direction == DIRECTION_OUTBOUND).where(CallLog.status == "completed")
+    follow_ups_period = await count(select(func.count(FollowUp.id)).where(FollowUp.created_at >= since_utc))
+    busiest = hours.most_common(1)[0][0] if hours else None
+
+    total_calls = await count(select(func.count(CallLog.id)))
+    live_calls = await count(select(func.count(CallLog.id)).where(CallLog.status == "in-progress"))
+    pending_appointments = await count(select(func.count(Appointment.id)).where(Appointment.status == STATUS_PENDING))
+    confirmed_upcoming = await count(
+        select(func.count(Appointment.id)).where(
+            Appointment.status == STATUS_CONFIRMED,
+            Appointment.start_at >= _local(now_utc).replace(tzinfo=None),
         )
-        completed_calls = completed_calls_result.scalar() or 0
-        logger.debug(f"Completed calls: {completed_calls}")
-
-        # Call completion rate
-        call_completion_rate = (
-            (completed_calls / total_calls * 100) if total_calls > 0 else 0
+    )
+    requests_period = await count(select(func.count(Appointment.id)).where(Appointment.created_at >= since_utc))
+    pending_follow_ups = await count(select(func.count(FollowUp.id)).where(FollowUp.status == FOLLOWUP_PENDING))
+    urgent_follow_ups = await count(
+        select(func.count(FollowUp.id)).where(FollowUp.status == FOLLOWUP_PENDING, FollowUp.priority == PRIORITY_URGENT)
+    )
+    by_kind_rows = (
+        await db.execute(
+            select(FollowUp.kind, func.count(FollowUp.id))
+            .where(FollowUp.status == FOLLOWUP_PENDING, FollowUp.kind != KIND_CONFIRM_APPOINTMENT)
+            .group_by(FollowUp.kind)
         )
+    ).all()
+    patients = await count(select(func.count(Patient.id)))
+    calls_period = len(rows)
 
-        # Calls with warning signs detected
-        logger.debug("Fetching warning calls...")
-        warning_calls_result = await db.execute(
-            select(func.count(CallLog.id)).where(CallLog.direction == DIRECTION_OUTBOUND).where(
-                CallLog.warning_signs_detected == True
-            )
-        )
-        warning_calls = warning_calls_result.scalar() or 0
-        logger.debug(f"Warning calls: {warning_calls}")
-
-        # Average CSAT (patient satisfaction)
-        logger.debug("Fetching average CSAT...")
-        avg_csat_result = await db.execute(
-            select(func.avg(CallLog.csat_score)).where(
-                CallLog.direction == DIRECTION_OUTBOUND,
-                CallLog.csat_score.isnot(None)
-            )
-        )
-        avg_csat = avg_csat_result.scalar() or 0
-        logger.debug(f"Average CSAT: {avg_csat}")
-
-        # Medication adherence (calls reporting good adherence)
-        logger.debug("Fetching adherence calls...")
-        adherence_calls_result = await db.execute(
-            select(func.count(CallLog.id)).where(CallLog.direction == DIRECTION_OUTBOUND).where(
-                CallLog.medication_adherence_reported.in_(["good", "excellent"])
-            )
-        )
-        adherence_calls = adherence_calls_result.scalar() or 0
-        logger.debug(f"Adherence calls: {adherence_calls}")
-
-        # Appointment compliance (confirmed appointments)
-        logger.debug("Fetching confirmed appointments...")
-        confirmed_appointments_result = await db.execute(
-            select(func.count(Appointment.id)).where(
-                Appointment.status.in_(["confirmed", "completed"])
-            )
-        )
-        confirmed_appointments = confirmed_appointments_result.scalar() or 0
-        logger.debug(f"Confirmed appointments: {confirmed_appointments}")
-
-        # Escalation cases (open)
-        logger.debug("Fetching open escalations...")
-        open_escalations_result = await db.execute(
-            select(func.count(Escalation.id)).where(
-                Escalation.status == "open"
-            )
-        )
-        open_escalations = open_escalations_result.scalar() or 0
-        logger.debug(f"Open escalations: {open_escalations}")
-
-        kpis = {
-            "total_patients_enrolled": total_patients,
-            "active_patients": active_patients,
-            "engagement_rate": round(
-                (active_patients / total_patients * 100) if total_patients > 0 else 0, 2
-            ),
-            "total_outreach_calls": total_calls,
-            "completed_calls": completed_calls,
-            "call_completion_rate": round(call_completion_rate, 2),
-            "calls_with_warnings": warning_calls,
-            "average_csat": round(avg_csat, 2) if avg_csat else None,
-            "medication_adherent_calls": adherence_calls,
-            "confirmed_appointments": confirmed_appointments,
-            "open_escalations": open_escalations,
-        }
-        logger.info(f"✅ KPIs returned successfully: {kpis}")
-        return kpis
-    except Exception as e:
-        logger.error(f"❌ Error fetching KPIs: {e}", exc_info=True)
-        raise
-
-
-@router.get("/kpis/trend", response_model=List[Dict])
-async def get_kpi_trend(
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-    days: int = Query(30, ge=7, le=365),
-) -> List[Dict]:
-    """Get KPI trends over time (for charts)."""
-    logger.info(f"📊 GET /api/analytics/kpis/trend called with days={days}")
-
-    try:
-        trend_data = []
-        today = datetime.utcnow().date()
-        logger.debug(f"Fetching trend data for {days} days ending {today}")
-
-        for day_offset in range(days, -1, -1):
-            current_date = today - timedelta(days=day_offset)
-            start_of_day = datetime.combine(current_date, datetime.min.time())
-            end_of_day = start_of_day + timedelta(days=1)
-
-            # Calls completed on this date
-            calls_result = await db.execute(
-                select(func.count(CallLog.id)).where(CallLog.direction == DIRECTION_OUTBOUND).where(
-                    CallLog.ended_at >= start_of_day,
-                    CallLog.ended_at < end_of_day,
-                    CallLog.status == "completed",
-                )
-            )
-            calls_today = calls_result.scalar() or 0
-
-            # Escalations created today
-            escalations_result = await db.execute(
-                select(func.count(Escalation.id)).where(
-                    Escalation.created_at >= start_of_day,
-                    Escalation.created_at < end_of_day,
-                )
-            )
-            escalations_today = escalations_result.scalar() or 0
-
-            # Average CSAT for calls today
-            csat_result = await db.execute(
-                select(func.avg(CallLog.csat_score)).where(
-                    CallLog.direction == DIRECTION_OUTBOUND,
-                    CallLog.ended_at >= start_of_day,
-                    CallLog.ended_at < end_of_day,
-                    CallLog.csat_score.isnot(None),
-                )
-            )
-            csat_today = csat_result.scalar() or 0
-
-            trend_data.append(
-                {
-                    "date": current_date.isoformat(),
-                    "calls_completed": calls_today,
-                    "escalations_created": escalations_today,
-                    "average_csat": round(csat_today, 2) if csat_today else None,
-                }
-            )
-
-        logger.info(f"✅ Trend data returned: {len(trend_data)} days")
-        return trend_data
-    except Exception as e:
-        logger.error(f"❌ Error fetching trend data: {e}", exc_info=True)
-        raise
+    return {
+        "days": days,
+        "calls_today": calls_today,
+        "calls_period": calls_period,
+        "total_calls": total_calls,
+        "live_calls": live_calls,
+        "avg_call_seconds": round(sum(durations) / len(durations)) if durations else None,
+        "appointment_requests_period": requests_period,
+        "request_rate": round(requests_period / calls_period * 100, 1) if calls_period else 0,
+        "pending_appointments": pending_appointments,
+        "confirmed_upcoming": confirmed_upcoming,
+        "pending_follow_ups": pending_follow_ups,
+        "urgent_follow_ups": urgent_follow_ups,
+        # Waiting follow-ups by kind (appointment confirmations are counted in pending_appointments)
+        "follow_ups_by_kind": {kind: n for kind, n in by_kind_rows},
+        "patients": patients,
+        # About the AI agent, last `days` days
+        "agent": {
+            "conversations": conversations,
+            "handled_alone": handled_alone,
+            "handled_alone_rate": round(handled_alone / conversations * 100) if conversations else 0,
+            "transferred": transferred,
+            "follow_ups_created": follow_ups_period,
+            "busiest_hour": busiest,
+        },
+        "intents": dict(intents),
+        "languages": dict(languages),
+        "trend": [
+            {"date": day.isoformat(), "calls": trend[day]["calls"], "requests": trend[day]["requests"]}
+            for day in sorted(trend)
+        ],
+    }

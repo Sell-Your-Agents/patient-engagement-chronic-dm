@@ -20,13 +20,13 @@ _ABBREVIATIONS = {"dr", "mr", "mrs", "ms", "st", "vs", "e.g", "i.e", "a.m", "p.m
 
 
 def _sentence_end(buffer: str) -> Optional[int]:
-    """Index of the first sentence-ending ".", "!" or "?" in buffer; None if there is none yet.
+    """Index of the first sentence-ending ".", "!", "?" or Hindi "।" in buffer; None if there is none yet.
 
     A "." only counts once the next character (a space) has arrived and the word before it is not
     an abbreviation, so "Dr. Rao" and "120.5" are not cut in two.
     """
     for i, char in enumerate(buffer):
-        if char in "!?":
+        if char in "!?।":
             return i
         if char != ".":
             continue
@@ -76,6 +76,14 @@ async def stream_conversation(
                             yield sentence
                     else:
                         break
+            try:
+                final = await stream.get_final_message()
+                if final.stop_reason == "max_tokens":
+                    logger.warning(
+                        f"Reply was cut off at the {max_tokens}-token limit; the end of it (and any [[END_CALL]]) was lost"
+                    )
+            except Exception:
+                pass
 
         # Yield any remaining text
         if sentence_buffer.strip():
@@ -86,30 +94,20 @@ async def stream_conversation(
         raise
 
 
-async def finalize_call_summary(
-    transcript: str,
-    system_context: str,
-) -> dict:
-    """Extract structured summary from call transcript using Claude.
+async def finalize_call_summary(transcript: str, system_context: str) -> dict:
+    """The structured call record (see CALL_SUMMARY_PROMPT) extracted from the transcript.
 
-    Args:
-        transcript: Full conversation transcript
-        system_context: Context about patient, condition, protocol
-
-    Returns:
-        Dictionary with: summary, sentiment, symptom_status, medication_adherence,
-        warning_signs_detected, warning_sign_details, appointment_requested, csat_score
+    Returns {} if the summary could not be made, so the call is still saved.
     """
-
-    extraction_prompt = CALL_SUMMARY_PROMPT.format(system_context=system_context, transcript=transcript)
-
+    extraction_prompt = CALL_SUMMARY_PROMPT.format(
+        org_name=settings.clinic_name, system_context=system_context, transcript=transcript
+    )
     try:
         response = await client.messages.create(
             model=SUMMARY_MODEL,
             max_tokens=900,
             messages=[{"role": "user", "content": extraction_prompt}],
         )
-
         response_text = response.content[0].text
         # Extract JSON from response (handle markdown code blocks)
         if "```json" in response_text:
@@ -118,32 +116,8 @@ async def finalize_call_summary(
             json_str = response_text.split("```")[1].split("```")[0].strip()
         else:
             json_str = response_text.strip()
-
-        return json.loads(json_str)
-
+        data = json.loads(json_str)
+        return data if isinstance(data, dict) else {}
     except Exception as e:  # any failure (API, auth, bad JSON) must not stop the call being saved
         logger.error(f"Call summary failed, saving the call without one: {e}")
-        return {
-            "reached": None,
-            "identity_confirmed": None,
-            "patient_name": None,
-            "reason": None,
-            "symptoms": [],
-            "urgency": None,
-            "emergency_advice_given": None,
-            "outcome": None,
-            "questions_for_doctor": None,
-            "language_support_needed": None,
-            "summary": "Unable to process transcript",
-            "sentiment": "unknown",
-            "symptom_status": "unknown",
-            "medication_adherence": "unknown",
-            "warning_signs_detected": False,
-            "warning_sign_details": None,
-            "appointment_requested": False,
-            "appointment_details": None,
-            "callback_requested": False,
-            "callback_time": None,
-            "callback_reason": None,
-            "csat_score": None,
-        }
+        return {}

@@ -1,23 +1,40 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-from sqlalchemy.ext.asyncio import AsyncSession
+"""Appointment requests and bookings. Staff confirm, reschedule, cancel or complete them here.
 
-from app.database import get_db
+Requests the agent records start "pending" (Pending confirmation). Staff call the patient,
+agree the time, then confirm. Confirming or cancelling also closes the request's follow-up task.
+"""
+from datetime import datetime, timedelta
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
 from app.auth.deps import get_current_user
-from app.models.user import User
-from app.models.appointment import Appointment
-from app.services.scheduling.appointment_service import AppointmentService
 from app.config import get_settings
-from app.services.scheduling.clinic_scheduling import BookingError, book_slot
+from app.database import get_db
+from app.models.appointment import (
+    SOURCE_STAFF,
+    STATUS_CANCELLED,
+    STATUS_CONFIRMED,
+    STATUS_PENDING,
+    STATUSES,
+    Appointment,
+)
+from app.models.call_log import call_ref
+from app.models.doctor import Doctor
+from app.models.user import User
 from app.routers.clinic import normalize_phone
-from app.models.appointment import SOURCE_STAFF
+from app.services.agent.context_shared import lookup_caller
+from app.services.scheduling.callback_service import close_appointment_follow_ups
+from app.services.scheduling.clinic_scheduling import BookingError, check_slot
 
 settings = get_settings()
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
+
+STATUS_PATTERN = "^(" + "|".join(STATUSES) + ")$"
 
 
 class AppointmentResponse(BaseModel):
@@ -25,18 +42,20 @@ class AppointmentResponse(BaseModel):
     doctor_id: Optional[int]
     doctor_name: str
     doctor_specialty: Optional[str]
+    doctor_requested: Optional[str]
     patient_id: Optional[int]
     patient_name: str
     phone_number: Optional[str]
-    plan_id: Optional[int]
     call_log_id: Optional[int]
+    call_ref: Optional[str]
     reason: Optional[str]
-    # Null for a check-in request that has no time yet
+    preferred_time: Optional[str]
     start_at: Optional[datetime]
     end_at: Optional[datetime]
     status: str
     source: str
-    clinic_name: str
+    staff_notes: Optional[str]
+    confirmed_at: Optional[datetime]
     created_at: datetime
 
 
@@ -46,61 +65,49 @@ def _out(a: Appointment) -> AppointmentResponse:
         doctor_id=a.doctor_id,
         doctor_name=a.doctor_display_name,
         doctor_specialty=a.doctor.specialty if a.doctor else None,
+        doctor_requested=a.doctor_requested,
         patient_id=a.patient_id,
         patient_name=a.patient_name,
         phone_number=a.phone_number,
-        plan_id=a.plan_id,
         call_log_id=a.call_log_id,
+        call_ref=call_ref(a.call_log_id) if a.call_log_id else None,
         reason=a.reason,
+        preferred_time=a.preferred_time,
         start_at=a.start_at,
         end_at=a.end_at,
         status=a.status,
         source=a.source,
-        clinic_name=settings.clinic_name,
+        staff_notes=a.staff_notes,
+        confirmed_at=a.confirmed_at,
         created_at=a.created_at,
     )
 
 
-async def _load(db: AsyncSession, id: int) -> Optional[Appointment]:
+async def _load(db: AsyncSession, appointment_id: int) -> Appointment:
     result = await db.execute(
-        select(Appointment).options(selectinload(Appointment.doctor)).where(Appointment.id == id)
+        select(Appointment).options(selectinload(Appointment.doctor)).where(Appointment.id == appointment_id)
     )
-    return result.scalar_one_or_none()
-
-
-class AppointmentCreateRequest(BaseModel):
-    patient_id: int
-    plan_id: Optional[int] = None
-    physician_name: str
-    scheduled_at: datetime
-    duration_minutes: int = 30
-    reason: Optional[str] = None
-
-
-class AppointmentUpdateRequest(BaseModel):
-    status: Optional[str] = None
-    scheduled_at: Optional[datetime] = None
+    appointment = result.scalar_one_or_none()
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    return appointment
 
 
 @router.get("/", response_model=List[AppointmentResponse])
 async def list_appointments(
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
     patient_id: Optional[int] = Query(None),
     doctor_id: Optional[int] = Query(None),
-    status: Optional[str] = Query(None),
+    status: Optional[str] = Query(None, pattern=STATUS_PATTERN),
     source: Optional[str] = Query(None, pattern="^(agent|staff)$"),
     date_from: Optional[datetime] = Query(None),
     date_to: Optional[datetime] = Query(None),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
-) -> List[AppointmentResponse]:
-    """Every appointment (phone agent, check-in requests, staff), by time; requests with no time come first."""
-    query = (
-        select(Appointment)
-        .options(selectinload(Appointment.doctor))
-        .order_by(Appointment.start_at.asc().nulls_first(), Appointment.id)
-    )
+    limit: int = Query(500, ge=1, le=2000),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Appointments; pending requests first, then by time."""
+    query = select(Appointment).options(selectinload(Appointment.doctor))
     if patient_id:
         query = query.where(Appointment.patient_id == patient_id)
     if doctor_id:
@@ -113,153 +120,105 @@ async def list_appointments(
         query = query.where(Appointment.start_at >= date_from.replace(tzinfo=None))
     if date_to:
         query = query.where(Appointment.start_at < date_to.replace(tzinfo=None))
+    query = query.order_by(Appointment.created_at.desc(), Appointment.id.desc())
     result = await db.execute(query.offset(skip).limit(limit))
-    return [_out(apt) for apt in result.scalars().all()]
+    return [_out(a) for a in result.scalars().all()]
 
 
-class StaffBookingRequest(BaseModel):
+class StaffAppointmentCreate(BaseModel):
+    patient_name: str = Field(min_length=1, max_length=120)
+    phone_number: str = Field(min_length=6, max_length=20)
     doctor_id: int
     start_at: datetime
-    patient_name: str
-    phone_number: str
-    reason: Optional[str] = None
-
-
-@router.post("/book", response_model=AppointmentResponse, status_code=201)
-async def book_for_caller(
-    data: StaffBookingRequest,
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-):
-    """Manual booking by staff into a doctor's free slot (same validation as the phone agent)."""
-    try:
-        appointment = await book_slot(
-            db,
-            doctor_id=data.doctor_id,
-            start_at=data.start_at.replace(tzinfo=None),
-            patient_name=data.patient_name.strip(),
-            phone_number=normalize_phone(data.phone_number),
-            reason=data.reason,
-            source=SOURCE_STAFF,
-        )
-    except BookingError as err:
-        raise HTTPException(status_code=400, detail=str(err))
-    await db.commit()
-    return _out(await _load(db, appointment.id))
+    reason: Optional[str] = Field(None, max_length=500)
+    confirmed: bool = True
 
 
 @router.post("/", response_model=AppointmentResponse, status_code=201)
 async def create_appointment(
-    request: AppointmentCreateRequest,
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-) -> AppointmentResponse:
-    """Create a new appointment."""
+    data: StaffAppointmentCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
+    """Staff book an appointment into a doctor's free slot (e.g. for a walk-in or a phone call they took)."""
+    doctor = await db.get(Doctor, data.doctor_id)
+    if not doctor or not doctor.is_active:
+        raise HTTPException(status_code=400, detail="Doctor not found")
     try:
-        appointment = await AppointmentService.book_appointment(
-            patient_id=request.patient_id,
-            plan_id=request.plan_id,
-            physician_name=request.physician_name,
-            scheduled_at=request.scheduled_at.replace(tzinfo=None),
-            db=db,
-        )
+        start_at = await check_slot(db, doctor, data.start_at.replace(tzinfo=None))
     except BookingError as err:
         raise HTTPException(status_code=400, detail=str(err))
-    if request.reason:
-        appointment.reason = request.reason
+    phone = normalize_phone(data.phone_number)
+    patient = await lookup_caller(db, phone)
+    appointment = Appointment(
+        doctor_id=doctor.id,
+        doctor_requested=doctor.specialty,
+        patient_id=patient.id if patient else None,
+        patient_name=data.patient_name.strip(),
+        phone_number=phone,
+        reason=data.reason,
+        start_at=start_at,
+        end_at=start_at + timedelta(minutes=doctor.slot_minutes),
+        preferred_time=start_at.strftime("%a %d %b, %I:%M %p"),
+        status=STATUS_CONFIRMED if data.confirmed else STATUS_PENDING,
+        source=SOURCE_STAFF,
+        confirmed_by_user_id=user.id if data.confirmed else None,
+        confirmed_at=datetime.utcnow() if data.confirmed else None,
+    )
+    db.add(appointment)
     await db.commit()
     return _out(await _load(db, appointment.id))
 
 
-@router.get("/{id}", response_model=AppointmentResponse)
-async def get_appointment(
-    id: int,
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-) -> AppointmentResponse:
-    """Get appointment details."""
-    appointment = await _load(db, id)
-
-    if not appointment:
-        raise HTTPException(status_code=404, detail="Appointment not found")
-
-    return _out(appointment)
+@router.get("/{appointment_id}", response_model=AppointmentResponse)
+async def get_appointment(appointment_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    return _out(await _load(db, appointment_id))
 
 
-@router.patch("/{id}", response_model=AppointmentResponse)
+class AppointmentUpdate(BaseModel):
+    status: Optional[str] = Field(None, pattern=STATUS_PATTERN)
+    doctor_id: Optional[int] = None
+    # Clinic time; set together with doctor_id (or the current doctor)
+    start_at: Optional[datetime] = None
+    staff_notes: Optional[str] = Field(None, max_length=2000)
+
+
+@router.patch("/{appointment_id}", response_model=AppointmentResponse)
 async def update_appointment(
-    id: int,
-    request: AppointmentUpdateRequest,
+    appointment_id: int,
+    data: AppointmentUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> AppointmentResponse:
-    """Update an appointment."""
-    appointment = await _load(db, id)
+    user: User = Depends(get_current_user),
+):
+    """Confirm (optionally setting doctor and time), reschedule, cancel or complete an appointment."""
+    appointment = await _load(db, appointment_id)
 
-    if not appointment:
-        raise HTTPException(status_code=404, detail="Appointment not found")
+    if data.doctor_id is not None or data.start_at is not None:
+        doctor_id = data.doctor_id if data.doctor_id is not None else appointment.doctor_id
+        doctor = await db.get(Doctor, doctor_id) if doctor_id else None
+        if not doctor:
+            raise HTTPException(status_code=400, detail="Choose a doctor")
+        appointment.doctor_id = doctor.id
+        start = data.start_at or appointment.start_at
+        if start:
+            try:
+                start = await check_slot(db, doctor, start.replace(tzinfo=None), ignore_appointment_id=appointment.id)
+            except BookingError as err:
+                raise HTTPException(status_code=400, detail=str(err))
+            appointment.start_at = start
+            appointment.end_at = start + timedelta(minutes=doctor.slot_minutes)
 
-    if request.status:
-        appointment.status = request.status
+    if data.staff_notes is not None:
+        appointment.staff_notes = data.staff_notes
 
-    if request.scheduled_at:
-        previous = appointment.start_at
-        appointment.start_at = request.scheduled_at.replace(tzinfo=None)
-        if appointment.end_at and previous:
-            appointment.end_at = appointment.start_at + (appointment.end_at - previous)
-        else:
-            appointment.end_at = appointment.start_at + timedelta(minutes=30)
+    if data.status and data.status != appointment.status:
+        if data.status == STATUS_CONFIRMED:
+            if not appointment.start_at or not appointment.doctor_id:
+                raise HTTPException(status_code=400, detail="Set the doctor and time before confirming")
+            appointment.confirmed_by_user_id = user.id
+            appointment.confirmed_at = datetime.utcnow()
+        appointment.status = data.status
+        if data.status in (STATUS_CONFIRMED, STATUS_CANCELLED):
+            await close_appointment_follow_ups(db, appointment.id, user.id)
 
-    appointment.updated_at = datetime.utcnow()
     await db.commit()
-
-    return _out(await _load(db, id))
-
-
-@router.get("/availability/{physician_name}", response_model=List[Dict])
-async def get_availability(
-    physician_name: str,
-    days_ahead: int = Query(14, ge=1, le=60),
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-) -> List[Dict]:
-    """Get available appointment slots for a physician."""
-    availability = await AppointmentService.get_availability(
-        db=db,
-        physician_name=physician_name,
-        days_ahead=days_ahead,
-    )
-    return availability
-
-
-@router.post("/{id}/confirm", response_model=AppointmentResponse)
-async def confirm_appointment(
-    id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> AppointmentResponse:
-    """Confirm an appointment (care team action)."""
-    appointment = await AppointmentService.confirm_appointment(
-        appointment_id=id,
-        confirmed_by_user_id=current_user.id,
-        db=db,
-    )
-    await db.commit()
-
-    return _out(await _load(db, id))
-
-
-@router.post("/{id}/cancel", response_model=AppointmentResponse)
-async def cancel_appointment(
-    id: int,
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-) -> AppointmentResponse:
-    """Cancel an appointment."""
-    appointment = await AppointmentService.cancel_appointment(
-        appointment_id=id,
-        db=db,
-    )
-    await db.commit()
-
-    return _out(await _load(db, id))
+    db.expire(appointment)
+    return _out(await _load(db, appointment_id))

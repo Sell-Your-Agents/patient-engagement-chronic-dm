@@ -1,30 +1,27 @@
-from datetime import datetime, date
+"""People who have called the clinic (or been added by staff).
+
+A row is created or updated after a call once the caller has given their name, so staff can see
+every call, appointment request and follow-up for one phone number in one place.
+"""
+from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, DateTime, Text, Boolean, Date
+
+from sqlalchemy import DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
+
 from app.database import Base
+
+LANGUAGES = ("en", "hi", "te")
 
 
 class Patient(Base):
     __tablename__ = "patients"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    mrn: Mapped[str] = mapped_column(String(50), unique=True, index=True)
-    first_name: Mapped[str] = mapped_column(String(120))
-    last_name: Mapped[str] = mapped_column(String(120))
-    date_of_birth: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    sex: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    name: Mapped[str] = mapped_column(String(120))
     phone_number: Mapped[str] = mapped_column(String(20), unique=True, index=True)
-    preferred_language: Mapped[str] = mapped_column(String(10), default="en")
-    secondary_phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    emergency_contact_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
-    emergency_contact_phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    communication_consent: Mapped[bool] = mapped_column(Boolean, default=True)
-    consent_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="active")
-    enrolled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # en | hi | te (the language of their latest call)
+    preferred_language: Mapped[str] = mapped_column(String(5), default="en")
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

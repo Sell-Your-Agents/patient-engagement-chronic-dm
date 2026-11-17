@@ -1,6 +1,6 @@
 """Which notifications each staff member has read.
 
-Notifications themselves are not stored: they are built live from escalations, callbacks and
+Notifications themselves are not stored: they are built live from follow-ups and
 appointments (routers/notifications.py), so they can never drift from the real records.
 Only the read state is kept here, one row per user per notification key.
 """

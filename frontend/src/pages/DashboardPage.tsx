@@ -1,411 +1,274 @@
 import { useState } from 'react'
-import { Link, useNavigate } from '@tanstack/react-router'
-import { useKpis } from '../hooks/useKpis'
-import { useCalls, useCallbacks, isLiveCall } from '../hooks/useCalls'
-import { useEscalations } from '../hooks/useEscalations'
+import { Link } from '@tanstack/react-router'
+import { useDashboard, type DashboardData } from '../hooks/useKpis'
+import { INTENT_LABELS, LANGUAGE_LABELS } from '../hooks/useCalls'
+import { useClinicInfo } from '../hooks/useClinic'
+import { PageHeader, Kpi, Panel, Loader, ErrorState, EmptyState, formatTime } from '../components/ui'
 import { useAppointments } from '../hooks/useAppointments'
-import { usePatients } from '../hooks/usePatients'
-import { useDoctors, useDoctorAvailability, useClinicInfo, type Doctor } from '../hooks/useClinic'
-import { useDiseasesOverview } from '../hooks/useDiseases'
+import { AppointmentStatusBadge, localISODate } from '../components/clinic'
 import { Icon } from '../components/Icon'
-import { PageHeader, Kpi, Panel, Loader, ErrorState, EmptyState, SeverityBadge, StatusBadge, Avatar, friendlyTime, formatTime, utcDate } from '../components/ui'
-import { localISODate, mondayIndex, hhmmTo12h } from '../components/clinic'
-
-const PREVIEW = 3
-
-/** Footer button that expands a panel's list to everything or back to the preview. */
-function ShowMore({ total, open, onToggle, noun }: { total: number; open: boolean; onToggle: () => void; noun: string }) {
-  if (total <= PREVIEW) return null
-  return (
-    <button className="more" onClick={onToggle}>
-      {open ? 'Show less' : `Show all ${total} ${noun}`}
-      <Icon name="chevronDown" className={`h-4 w-4 transition ${open ? 'rotate-180' : ''}`} />
-    </button>
-  )
-}
-
-const SEV_ORDER: Record<string, number> = { urgent: 0, critical: 0, high: 1, medium: 2, low: 3 }
-
-/** Local midnight for each of the last n days, oldest first. */
-function lastDays(n: number) {
-  return Array.from({ length: n }, (_, i) => {
-    const d = new Date()
-    d.setHours(0, 0, 0, 0)
-    d.setDate(d.getDate() - (n - 1 - i))
-    return d
-  })
-}
 
 export function DashboardPage() {
-  const navigate = useNavigate()
-  const { data: kpis, isLoading, error, refetch } = useKpis()
-  const { data: calls } = useCalls()
-  const { data: callbacks } = useCallbacks()
-  const { data: escalations } = useEscalations()
-  const { data: patients } = usePatients(0, 100)
-  const { data: doctors } = useDoctors()
-  const { data: diseases } = useDiseasesOverview()
-  const today = localISODate(new Date())
-  const { data: appts } = useAppointments({ date_from: today })
-  const [showAll, setShowAll] = useState({ esc: false, appts: false, docs: false })
-  const toggle = (k: keyof typeof showAll) => setShowAll((s) => ({ ...s, [k]: !s[k] }))
+  const { data, isLoading, error, refetch } = useDashboard(7)
+  const { data: info } = useClinicInfo()
 
   if (isLoading) return <Loader text="Loading dashboard…" variant="dashboard" />
-  if (error || !kpis) return <ErrorState text="Could not load the dashboard" onRetry={() => refetch()} />
+  if (error || !data) return <ErrorState text="Could not load the dashboard" onRetry={() => refetch()} />
 
-  const patientName = (id: number | null) => {
-    if (id === null) return 'New caller'
-    const p = patients?.find((x) => x.id === id)
-    return p ? `${p.first_name} ${p.last_name}` : `Patient ${id}`
-  }
-
-  // Daily series for the sparklines
-  const days = lastDays(7)
-  const keyOf = (v: string) => localISODate(utcDate(v))
-  const allCalls = calls || []
-  const week = days.map((d) => {
-    const k = localISODate(d)
-    const dayCalls = allCalls.filter((c) => keyOf(c.started_at || c.created_at) === k)
-    return {
-      n: dayCalls.length,
-      done: dayCalls.filter((c) => c.status === 'completed').length,
-      esc: (escalations || []).filter((e) => keyOf(e.created_at) === k).length,
-    }
-  })
-  const weekTotal = week.reduce((a, w) => a + w.n, 0)
-
-  const openEsc = (escalations || [])
-    .filter((e) => e.status !== 'resolved')
-    .sort((a, b) => (SEV_ORDER[a.severity] ?? 9) - (SEV_ORDER[b.severity] ?? 9) || b.created_at.localeCompare(a.created_at))
-  const urgent = openEsc.filter((e) => e.severity === 'urgent').length
-
-  const due = (callbacks || []).filter((c) => c.status === 'pending' && new Date(c.scheduled_time).getTime() <= Date.now()).sort((a, b) => a.scheduled_time.localeCompare(b.scheduled_time))
-  const live = allCalls.filter(isLiveCall).length
-
-  const todays = (appts || [])
-    .filter((a) => a.start_at && localISODate(new Date(a.start_at)) === today && a.status !== 'cancelled')
-    .sort((a, b) => (a.start_at || '').localeCompare(b.start_at || ''))
-  const toConfirm = todays.filter((a) => a.status === 'requested').length
-  const conditionCount = (diseases || []).length
-  const dayIdx = mondayIndex(new Date())
-  const onDuty = (doctors || []).filter((d) => d.is_active && d.working_days.includes(dayIdx))
-  const offDuty = (doctors || []).filter((d) => !(d.is_active && d.working_days.includes(dayIdx)))
-  const doctorCount = new Set(todays.map((a) => a.doctor_id)).size
+  const pendingNote =
+    info?.appointment_integration === 'none' ? 'No clinic booking system connected: staff confirm every request' : 'Waiting for staff to confirm'
 
   return (
     <div>
       <PageHeader title="Dashboard" />
 
-      <div className="strip">
-        <span className="live">
-          <i className="dot" /> LIVE
-        </span>
-        <div className="seg">
-          <Icon name="phone" className="h-[18px] w-[18px]" />
-          <span>
-            <b>{live}</b> call{live === 1 ? '' : 's'} in progress
-          </span>
-        </div>
-        <i className="sep" />
-        <div className="seg">
-          <Icon name="clock" className="h-4 w-4" />
-          <span>
-            <b>{due.length}</b> callback{due.length === 1 ? '' : 's'} due now
-            {due[0] ? ` · ${due[0].patient_name || due[0].phone_number}, ${formatTime(due[0].scheduled_time)}` : ''}
-          </span>
-        </div>
-        <i className="sep" />
-        <div className="seg">
-          <Icon name="alert" className="h-[18px] w-[18px]" />
-          <span>
-            <b>{urgent}</b> urgent escalation{urgent === 1 ? '' : 's'} awaiting a clinician
-          </span>
-        </div>
-        <Link to="/escalations" className="btn">
-          Open queue →
-        </Link>
-      </div>
-
-      <div className="grid g5 mb-3.5">
-        <Kpi to="/patients" label="Enrolled patients" value={kpis.total_patients_enrolled} hint={`${conditionCount} chronic condition${conditionCount === 1 ? '' : 's'}`} icon="users" tone="a" />
-        <Kpi to="/calls" label="Calls this week" value={weekTotal} hint={`${kpis.total_outreach_calls} outreach calls overall`} icon="phone" tone="a" trend={week.map((w) => w.n)} />
-        <Kpi to="/calls" label="Completion rate" value={`${Math.round(kpis.call_completion_rate)}%`} hint="Answered and finished" icon="trending" tone="ok" dir="up" trend={week.map((w) => w.done)} />
+      <div className="grid g4 mb-3.5">
         <Kpi
-          to="/escalations"
-          label="Open escalations"
-          value={openEsc.length}
-          valueTone={openEsc.length ? 'bad' : undefined}
-          hint={`${urgent} urgent`}
-          dir={urgent ? 'dn' : undefined}
-          icon="alert"
-          tone="bad"
-          trend={week.map((w) => w.esc)}
+          label="Calls today"
+          value={data.calls_today}
+          hint={data.live_calls ? `${data.live_calls} in progress now` : `${data.calls_period} in the last ${data.days} days`}
+          icon="phoneIncoming"
+          tone="a"
+          to="/calls"
         />
-        <Kpi to="/appointments" label="Appointments today" value={todays.length} hint={`${toConfirm} request${toConfirm === 1 ? '' : 's'} to confirm`} icon="calendar" tone="violet" />
+        <Kpi
+          label="Needs staff follow-up"
+          value={data.pending_follow_ups}
+          hint={data.urgent_follow_ups ? `${data.urgent_follow_ups} urgent: call now` : 'People to call back'}
+          icon={data.urgent_follow_ups ? 'alert' : 'phoneCall'}
+          tone={data.urgent_follow_ups ? 'bad' : 'warn'}
+          valueTone={data.urgent_follow_ups ? 'bad' : undefined}
+          to="/follow-ups"
+        />
+        <Kpi label="Pending confirmation" value={data.pending_appointments} hint={pendingNote} icon="calendar" tone="violet" to="/appointments" />
+        <Kpi label="Confirmed upcoming" value={data.confirmed_upcoming} hint="Visits confirmed by staff" icon="checkCircle" tone="ok" to="/appointments" />
       </div>
 
-      <div className="grid g3 mb-3.5">
+      {/* Two cards side by side: calls over time | why and in which language */}
+      <div className="grid g2 mb-3.5">
         <Panel
-          className="panel-col"
-          title="Needs attention"
-          subtitle="Open escalations, most severe first"
-          right={
-            <Link to="/escalations" className="btn sm">
-              Open queue
-            </Link>
-          }
+          title={`Calls per day · last ${data.days} days`}
+          subtitle={`${data.calls_period} calls · ${data.appointment_requests_period} appointment requests (${data.request_rate}% of calls)`}
         >
-          {openEsc.length === 0 ? (
-            <EmptyState icon="checkCircle" text="All clear. No escalations need action." />
-          ) : (
-            <ul className={`list ${showAll.esc ? 'list-scroll' : ''}`}>
-              {openEsc.slice(0, showAll.esc ? undefined : PREVIEW).map((e) => (
-                <li key={e.id} className="rowbtn !items-start" onClick={() => navigate({ to: '/escalations/$id', params: { id: String(e.id) } })}>
-                  <SeverityBadge severity={e.severity} fixed />
-                  <span className="min-w-0 flex-1">
-                    <b className="block truncate">{patientName(e.patient_id)}</b>
-                    <span className="line-clamp-2 text-[13px] text-ink-soft">{e.reason}</span>
-                    <small className="mt-0.5 block text-[11.5px] text-ink-muted">
-                      {friendlyTime(e.created_at, true)}
-                      {e.status === 'acknowledged' ? ' · acknowledged' : ''}
-                    </small>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <ShowMore total={openEsc.length} open={showAll.esc} onToggle={() => toggle('esc')} noun="escalations" />
+          <CallsChart data={data} />
         </Panel>
-
-        <Panel
-          className="panel-col"
-          title="Today’s schedule"
-          subtitle={`${todays.length} appointment${todays.length === 1 ? '' : 's'} across ${doctorCount} doctor${doctorCount === 1 ? '' : 's'}`}
-          right={
-            <Link to="/appointments" className="btn sm">
-              All
-            </Link>
-          }
-        >
-          {todays.length === 0 ? (
-            <EmptyState icon="calendar" text="No appointments today." />
-          ) : (
-            <div className={`px-[18px] pb-3.5 pt-1 ${showAll.appts ? 'list-scroll' : ''}`}>
-              <div className="tl">
-                {todays.slice(0, showAll.appts ? undefined : PREVIEW).map((a) => (
-                  <div key={a.id} className="contents">
-                    <div className="t">{formatTime(a.start_at)}</div>
-                    <div className={`e ${a.status === 'confirmed' || a.status === 'completed' ? 'done' : a.status === 'requested' ? 'wait' : ''}`}>
-                      <b>{a.patient_name}</b>
-                      <small>
-                        {a.doctor_name}
-                        {a.reason ? ` · ${a.reason}` : ''}
-                      </small>
-                      <div className="mt-1">
-                        <StatusBadge status={a.status} dotted={false} />
-                      </div>
-                    </div>
-                  </div>
-                ))}
+        <Panel title="Why people called" subtitle={`Caller intent and language · last ${data.days} days`}>
+          <ShareBars counts={data.intents} labels={INTENT_LABELS} empty="No calls yet" />
+          <div className="mx-4 mb-4 border-t border-line-soft pt-3">
+            <div className="lbl mb-2">Languages</div>
+            {Object.keys(data.languages).length === 0 ? (
+              <span className="text-[13px] text-ink-muted">No calls yet</span>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(data.languages)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([code, n]) => {
+                    const total = Object.values(data.languages).reduce((x, y) => x + y, 0)
+                    return (
+                      <span key={code} className="chip">
+                        {LANGUAGE_LABELS[code] || code} <b>{n}</b>
+                        <span className="text-ink-muted">· {Math.round((n / total) * 100)}%</span>
+                      </span>
+                    )
+                  })}
               </div>
-            </div>
-          )}
-          <ShowMore total={todays.length} open={showAll.appts} onToggle={() => toggle('appts')} noun="appointments" />
-        </Panel>
-
-        <Panel
-          className="panel-col"
-          title="Doctors on duty"
-          subtitle="Next free slot"
-          right={
-            <Link to="/doctors" className="btn sm">
-              Roster
-            </Link>
-          }
-        >
-          {(doctors || []).length === 0 ? (
-            <EmptyState icon="stethoscope" text="No doctors configured." />
-          ) : (
-            <ul className={`list ${showAll.docs ? 'list-scroll' : ''}`}>
-              {onDuty.slice(0, showAll.docs ? undefined : PREVIEW).map((d) => (
-                <DoctorRow key={d.id} doctor={d} />
-              ))}
-              {(showAll.docs ? offDuty : offDuty.slice(0, Math.max(0, PREVIEW - onDuty.length))).map((d) => (
-                <li key={d.id} className="opacity-60">
-                  <Avatar name={d.name} />
-                  <span className="min-w-0 flex-1">
-                    <b className="block truncate">{d.name}</b>
-                    <span className="block truncate text-[12.5px] text-ink-muted">{d.specialty}</span>
-                  </span>
-                  <span className="pill mute">Off today</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <ShowMore total={(doctors || []).length} open={showAll.docs} onToggle={() => toggle('docs')} noun="doctors" />
+            )}
+          </div>
         </Panel>
       </div>
 
-      <AboutPatientPulse conditions={(diseases || []).map((d) => d.display_name)} />
+      {/* Today's appointments beside the agent */}
+      <div className="grid gap-[14px] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+        <TodaySchedule />
+        <AgentCard />
+      </div>
     </div>
   )
 }
 
-function DoctorRow({ doctor }: { doctor: Doctor }) {
-  const { data: slots } = useDoctorAvailability(doctor.id, 7)
-  const next = slots?.[0]
+/** Today's appointments by time (pending requests with a slot, confirmed and completed); scrolls when long. */
+function TodaySchedule() {
+  const today = new Date()
+  const tomorrow = new Date(today)
+  tomorrow.setDate(today.getDate() + 1)
+  const { data, isLoading } = useAppointments({ date_from: localISODate(today), date_to: localISODate(tomorrow) })
+  const items = (data || [])
+    .filter((a) => a.start_at && a.status !== 'cancelled')
+    .sort((x, y) => (x.start_at! < y.start_at! ? -1 : 1))
+  const doctors = new Set(items.map((a) => a.doctor_id)).size
+  const dot: Record<string, string> = { completed: 'var(--ok)', confirmed: 'var(--accent)', pending: 'var(--warn)' }
+
   return (
-    <li>
-      <Avatar name={doctor.name} />
-      <span className="min-w-0 flex-1">
-        <b className="block truncate">{doctor.name}</b>
-        <span className="block truncate text-[12.5px] text-ink-muted">
-          {doctor.specialty} · {hhmmTo12h(doctor.start_time)} – {hhmmTo12h(doctor.end_time)}
-        </span>
-      </span>
-      <span className="shrink-0 text-right">
-        <span className="pill ok dotted">On duty</span>
-        <br />
-        <small className="text-ink-muted">{next ? friendlyTime(next) : slots ? 'Fully booked' : '…'}</small>
-      </span>
-    </li>
+    <Panel
+      className="flex min-w-0 flex-col"
+      title="Today's schedule"
+      subtitle={items.length ? `${items.length} appointment${items.length === 1 ? '' : 's'} across ${doctors} doctor${doctors === 1 ? '' : 's'}` : 'No appointments today'}
+      right={
+        <Link to="/appointments" className="btn sm">
+          All
+        </Link>
+      }
+    >
+      {isLoading ? null : items.length === 0 ? (
+        <EmptyState icon="calendar" text="Nothing booked for today yet." />
+      ) : (
+        <div className="max-h-[300px] overflow-y-auto px-4 pb-4">
+          {items.map((a) => (
+            <div key={a.id} className="flex gap-3">
+              <span className="w-[72px] shrink-0 pt-0.5 text-right text-[13px] font-bold tabular-nums">{formatTime(a.start_at)}</span>
+              <div className="relative flex w-3 shrink-0 justify-center">
+                <span className="absolute inset-y-0 w-px bg-line" />
+                <span className="relative mt-1.5 h-2.5 w-2.5 rounded-full" style={{ background: dot[a.status] || 'var(--mute)' }} />
+              </div>
+              <div className="min-w-0 flex-1 pb-4">
+                <b className="block truncate text-[14px]">{a.patient_name}</b>
+                <small className="block truncate text-[12.5px] text-ink-muted" title={[a.doctor_name, a.reason].filter(Boolean).join(' · ')}>
+                  {[a.doctor_name, a.reason].filter(Boolean).join(' · ')}
+                </small>
+                <span className="mt-1 inline-block">
+                  <AppointmentStatusBadge status={a.status} />
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
   )
 }
 
-/* ------------------------------------------------------------------ */
-/* About section                                                      */
-/* ------------------------------------------------------------------ */
-
-const STEPS = [
-  { title: 'Check-in call', text: 'The agent calls each patient on their care-plan schedule.' },
-  { title: 'Health questions', text: 'Readings, symptoms and medicines, in the patient’s language.' },
-  { title: 'Red-flag check', text: 'Warning signs raise an escalation for a clinician.' },
-  { title: 'Follow-up', text: 'Books a visit or schedules a callback, then logs the call.' },
-]
-
-function AboutPatientPulse({ conditions }: { conditions: string[] }) {
+/** The AI agent itself: what it can do on a call, and whether each ability is switched on. */
+function AgentCard() {
   const { data: info } = useClinicInfo()
-  const agent = info?.agent_name || 'The agent'
+  const agent = info?.agent_name || 'Agent'
+  const langs = (info?.languages || []).map((l) => l.name)
+  const abilities: { title: string; text: string; on: boolean }[] = [
+    { title: 'Answers every call', text: `In ${langs.join(', ') || 'English'}; greets saved patients in their own language`, on: true },
+    { title: 'Records appointment requests', text: info?.appointment_integration === 'none' ? 'Doctor, time and reason; staff confirm on Appointments' : 'Books straight into the clinic system', on: true },
+    { title: 'Answers doctor and timing questions', text: 'Only from the Doctors and Clinic Knowledge pages, never made up', on: true },
+    { title: 'Takes callback requests', text: 'Missed calls and "please call me back" go to Follow-ups', on: true },
+    { title: 'Passes on questions it cannot answer', text: 'Saved as "Question not answered" for staff to call back', on: true },
+    { title: 'Connects callers to the front desk', text: info?.human_transfer ? 'Hold music, then rings the front desk' : 'Off: set a front-desk number to turn it on; until then it takes a message', on: !!info?.human_transfer },
+    { title: 'Handles emergencies', text: 'Tells the caller to call 108 and adds an urgent follow-up', on: true },
+    { title: 'Remembers earlier calls', text: 'Knows what the same number asked last time', on: true },
+  ]
   return (
-    <div className="card about">
-      <div className="copy">
-        <div className="lbl !text-brand">About PatientPulse</div>
-        <h2>An AI care assistant that keeps chronic patients on track between visits</h2>
-        <p className="lead">
-          {agent} phones patients living with long-term conditions on a regular schedule, asks about their readings, symptoms and medicines, and
-          explains their care in plain words. When something sounds wrong, it flags the patient to the care team straight away. Patients can also call
-          the clinic number to book a visit or ask a question.
-        </p>
-        <div className="flex flex-wrap gap-1.5">
-          {(conditions.length ? conditions : ['Type 2 Diabetes', 'Hypertension', 'COPD', 'Asthma']).map((c) => (
-            <span key={c} className="pill acc">
-              {c}
+    <Panel
+      title={`${agent} · AI calling agent`}
+      subtitle={`What ${agent} can do on a call`}
+      right={
+        <Link to="/call-agent" className="btn sm p">
+          <Icon name="phone" className="h-3.5 w-3.5" /> Test call
+        </Link>
+      }
+    >
+      <div className="grid gap-2 px-4 pb-4 sm:grid-cols-2">
+        {abilities.map((ab) => (
+          <div key={ab.title} className={`flex min-w-0 items-start gap-2.5 rounded-[10px] border border-line-soft p-2.5 ${ab.on ? '' : 'opacity-60'}`}>
+            <span className={`ico ${ab.on ? 'ok' : 'mute'} !h-6 !w-6 shrink-0`}>
+              <Icon name={ab.on ? 'check' : 'x'} className="h-3.5 w-3.5" />
+            </span>
+            <div className="min-w-0">
+              <b className="block text-[13px] leading-snug">{ab.title}</b>
+              <small className="block text-[12px] leading-snug text-ink-muted">{ab.text}</small>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  )
+}
+
+/** One series (calls per day) on one axis; the tooltip adds that day's appointment requests. */
+function CallsChart({ data }: { data: DashboardData }) {
+  const [hover, setHover] = useState<number | null>(null)
+  const max = Math.max(1, ...data.trend.map((d) => d.calls))
+  const ticks = max <= 4 ? Array.from({ length: max + 1 }, (_, i) => i) : [0, Math.round(max / 2), max]
+  const label = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+  const weekday = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short' })
+  const active = hover !== null ? data.trend[hover] : null
+
+  if (data.calls_period === 0) return <EmptyState icon="phone" text="No calls in this period yet. Try a test call from Call the Agent." />
+
+  return (
+    <div className="px-4 pb-4">
+      <div className="mb-2 h-5 text-[12.5px] text-ink-soft" aria-live="polite">
+        {active ? (
+          <>
+            <b className="text-ink">{weekday(active.date)} {label(active.date)}</b> · {active.calls} call{active.calls === 1 ? '' : 's'} · {active.requests} appointment request
+            {active.requests === 1 ? '' : 's'}
+          </>
+        ) : (
+          'Hover a day for details'
+        )}
+      </div>
+      <div className="relative flex h-[180px] gap-2">
+        <div className="flex w-6 flex-col-reverse justify-between text-right text-[11px] text-ink-muted">
+          {ticks.map((t) => (
+            <span key={t} className="leading-none">
+              {t}
             </span>
           ))}
         </div>
-        <div className="lbl mt-1">How a check-in works</div>
-        <div className="steps">
-          {STEPS.map((s, i) => (
-            <div key={s.title} className="step">
-              <span className="n">{i + 1}</span>
-              <b>{s.title}</b>
-              <small>{s.text}</small>
-            </div>
+        <div className="relative flex flex-1 items-end gap-[2px] border-b border-line" role="img" aria-label={`Calls per day for the last ${data.days} days`}>
+          {ticks.slice(1).map((t) => (
+            <div key={t} className="pointer-events-none absolute inset-x-0 border-t border-dashed border-line-soft" style={{ bottom: `${(t / max) * 100}%` }} />
+          ))}
+          {data.trend.map((d, i) => (
+            <button
+              key={d.date}
+              type="button"
+              className="relative flex h-full flex-1 items-end justify-center focus:outline-none"
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover(null)}
+              onFocus={() => setHover(i)}
+              onBlur={() => setHover(null)}
+              aria-label={`${label(d.date)}: ${d.calls} calls, ${d.requests} appointment requests`}
+            >
+              <span
+                className="block w-full max-w-[26px] rounded-t-[4px] transition-opacity"
+                style={{
+                  height: d.calls ? `${(d.calls / max) * 100}%` : 0,
+                  minHeight: d.calls ? 3 : 0,
+                  background: 'var(--accent)',
+                  opacity: hover === null || hover === i ? 1 : 0.45,
+                }}
+              />
+            </button>
           ))}
         </div>
       </div>
-
-      <div className="art" aria-hidden="true">
-        <div className="tile">
-          <BookingArt />
-          <b>Callbacks &amp; bookings</b>
-          <small>Books doctor visits and calls patients back at the time they ask for.</small>
-        </div>
-        <div className="tile">
-          <GlucoseArt />
-          <b>Sugar &amp; BP readings</b>
-          <small>Records fasting sugar and blood pressure from each call.</small>
-        </div>
-        <div className="tile">
-          <InhalerArt />
-          <b>Breathing checks</b>
-          <small>Tracks breathlessness and rescue-inhaler use for COPD and asthma.</small>
-        </div>
-        <div className="tile">
-          <HeartArt />
-          <b>Warning signs</b>
-          <small>Urgent symptoms reach a clinician in minutes, not days.</small>
-        </div>
+      <div className="ml-8 mt-1.5 flex gap-[2px] text-[10.5px] text-ink-muted">
+        {data.trend.map((d, i) => (
+          <span key={d.date} className="flex-1 text-center">
+            {i === 0 || i === data.trend.length - 1 || i === Math.floor(data.trend.length / 2) ? label(d.date) : ''}
+          </span>
+        ))}
       </div>
     </div>
   )
 }
 
-/* Simple theme-aware illustrations (drawn, not photos) */
-
-function BookingArt() {
+/** Share of calls per category: label and count in ink, one accent bar for magnitude. */
+function ShareBars({ counts, labels, empty }: { counts: Record<string, number>; labels: Record<string, string>; empty: string }) {
+  const rows = Object.entries(counts).sort((a, b) => b[1] - a[1])
+  const total = rows.reduce((sum, [, n]) => sum + n, 0)
+  if (!total) return <div className="px-4 pb-5 text-[13px] text-ink-muted">{empty}</div>
   return (
-    <svg viewBox="0 0 200 92">
-      <rect x="0" y="0" width="200" height="92" rx="10" fill="var(--accent-bg)" />
-      {/* calendar with a booked slot */}
-      <rect x="30" y="16" width="70" height="62" rx="9" fill="var(--card)" stroke="var(--accent)" strokeWidth="2.5" />
-      <path d="M30 34h70" stroke="var(--accent)" strokeWidth="2.5" />
-      <path d="M48 10v12M82 10v12" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" />
-      <rect x="40" y="42" width="12" height="10" rx="2.5" fill="var(--line)" />
-      <rect x="59" y="42" width="12" height="10" rx="2.5" fill="var(--accent)" />
-      <rect x="78" y="42" width="12" height="10" rx="2.5" fill="var(--line)" />
-      <rect x="40" y="58" width="12" height="10" rx="2.5" fill="var(--line)" />
-      <rect x="59" y="58" width="12" height="10" rx="2.5" fill="var(--line)" />
-      <path d="M62 47l2.5 2.5 4.5-5" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-      {/* phone with a callback arrow */}
-      <rect x="124" y="20" width="44" height="54" rx="10" fill="var(--card)" stroke="var(--violet)" strokeWidth="2.5" />
-      <path d="M153 50v3a2.4 2.4 0 0 1-2.6 2.4 23.6 23.6 0 0 1-10.3-3.7 23 23 0 0 1-7.1-7.1 23.6 23.6 0 0 1-3.7-10.3A2.4 2.4 0 0 1 131.7 32h3a2.4 2.4 0 0 1 2.4 2c.1 1.1.4 2.2.8 3.3a2.4 2.4 0 0 1-.5 2.5l-1.3 1.3a19 19 0 0 0 7.1 7.1l1.3-1.3a2.4 2.4 0 0 1 2.5-.5c1.1.4 2.2.7 3.3.8a2.4 2.4 0 0 1 2 2.4z" fill="none" stroke="var(--violet)" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M176 30a14 14 0 0 1 0 22" fill="none" stroke="var(--violet)" strokeWidth="2.2" strokeLinecap="round" />
-      <path d="M172 52l4 1 1-4" fill="none" stroke="var(--violet)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function GlucoseArt() {
-  return (
-    <svg viewBox="0 0 200 92">
-      <rect x="0" y="0" width="200" height="92" rx="10" fill="var(--info-bg)" />
-      <rect x="28" y="14" width="56" height="66" rx="12" fill="var(--card)" stroke="var(--info)" strokeWidth="2.5" />
-      <rect x="37" y="23" width="38" height="24" rx="5" fill="var(--info-bg)" />
-      <text x="56" y="40" textAnchor="middle" fontSize="12" fontWeight="900" fill="var(--info)" fontFamily="Lato, sans-serif">
-        142
-      </text>
-      <circle cx="56" cy="62" r="7" fill="var(--info)" />
-      <rect x="84" y="40" width="22" height="6" rx="3" fill="var(--info)" />
-      <polyline points="116,62 132,50 146,56 162,34 178,40" fill="none" stroke="var(--bad)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="178" cy="40" r="4" fill="var(--bad)" />
-    </svg>
-  )
-}
-
-function InhalerArt() {
-  return (
-    <svg viewBox="0 0 200 92">
-      <rect x="0" y="0" width="200" height="92" rx="10" fill="var(--ok-bg)" />
-      <rect x="58" y="10" width="30" height="50" rx="8" fill="var(--card)" stroke="var(--ok)" strokeWidth="2.5" />
-      <path d="M52 58h44v14a6 6 0 0 1-6 6H76l-8 8H58a6 6 0 0 1-6-6z" fill="var(--ok)" />
-      <path d="M110 34c14 0 14 10 28 10s14-10 28-10" fill="none" stroke="var(--ok)" strokeWidth="2.5" strokeLinecap="round" opacity=".7" />
-      <path d="M110 50c14 0 14 10 28 10s14-10 28-10" fill="none" stroke="var(--ok)" strokeWidth="2.5" strokeLinecap="round" opacity=".45" />
-    </svg>
-  )
-}
-
-function HeartArt() {
-  return (
-    <svg viewBox="0 0 200 92">
-      <rect x="0" y="0" width="200" height="92" rx="10" fill="var(--bad-bg)" />
-      <path d="M62 76s-30-17-30-38a16 16 0 0 1 30-8 16 16 0 0 1 30 8c0 21-30 38-30 38z" fill="var(--card)" stroke="var(--bad)" strokeWidth="2.5" strokeLinejoin="round" />
-      <polyline points="36,46 50,46 56,34 64,58 70,46 88,46" fill="none" stroke="var(--bad)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M128 22 L150 62 H106 Z" fill="var(--warn-bg)" stroke="var(--warn)" strokeWidth="2.5" strokeLinejoin="round" />
-      <line x1="128" y1="36" x2="128" y2="48" stroke="var(--warn)" strokeWidth="3" strokeLinecap="round" />
-      <circle cx="128" cy="55" r="2" fill="var(--warn)" />
-      <rect x="160" y="30" width="26" height="26" rx="7" fill="var(--accent)" />
-      <path d="M173 36v14M166 43h14" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
-    </svg>
+    <div className="space-y-3 px-4 pb-4">
+      {rows.map(([key, n]) => (
+        <div key={key} title={`${labels[key] || key}: ${n} of ${total} calls`}>
+          <div className="mb-1 flex justify-between gap-2 text-[13px]">
+            <span className="truncate text-ink-soft">{labels[key] || key.replace(/_/g, ' ')}</span>
+            <b>
+              {n} <span className="font-normal text-ink-muted">· {Math.round((n / total) * 100)}%</span>
+            </b>
+          </div>
+          <span className="bar">
+            <i style={{ width: `${(n / total) * 100}%` }} />
+          </span>
+        </div>
+      ))}
+    </div>
   )
 }

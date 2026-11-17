@@ -4,18 +4,16 @@ import { useQuery } from '@tanstack/react-query'
 import { Call, Device } from '@twilio/voice-sdk'
 import { apiClient } from '../lib/apiClient'
 import { DirectCall } from '../lib/directCall'
-import { usePatients } from '../hooks/usePatients'
 import { apiErrorMessage } from '../hooks/useClinic'
-import type { Call as CallLogEntry } from '../hooks/useCalls'
+import { INTENT_LABELS, LANGUAGE_LABELS, type CallDetail as CallLogEntry } from '../hooks/useCalls'
 import { Icon } from '../components/Icon'
 import { PageHeader, Panel, Loader, ErrorState } from '../components/ui'
-import { OutcomeBadge, TranscriptView } from '../components/clinic'
+import { BookingBadge, TranscriptView } from '../components/clinic'
 
 type Phase = 'idle' | 'connecting' | 'live' | 'ended'
 /** direct: browser <-> backend, no Twilio. twilio: Twilio Voice SDK through the clinic-number webhook. */
 type Mode = 'direct' | 'twilio'
 
-const NEW_CALLER = 'new'
 const LOOKUP_ATTEMPTS = 30
 
 function formatSeconds(total: number) {
@@ -37,10 +35,8 @@ function micError(err: unknown, fallback: string) {
  */
 export function CallAgentPage() {
   const status = useQuery({ queryKey: ['browser-call', 'status'], queryFn: () => apiClient.browserCallStatus() })
-  const { data: patients } = usePatients(0, 100)
 
   const [mode, setMode] = useState<Mode>('direct')
-  const [callAs, setCallAs] = useState<string>(NEW_CALLER)
   const [callerNumber, setCallerNumber] = useState('')
   const [record, setRecord] = useState(false)
   const [recordTouched, setRecordTouched] = useState(false)
@@ -89,15 +85,11 @@ export function CallAgentPage() {
     const timer = setInterval(async () => {
       attempts += 1
       try {
-        let match: CallLogEntry | null = null
-        if (callId) {
-          match = (await apiClient.getCall(callId)) as CallLogEntry
-        } else {
-          const calls = (await apiClient.listCalls({ direction: 'inbound', limit: 25 })) as CallLogEntry[]
-          match = calls.find((c) => c.call_sid === callSid) || null
-        }
+        let id = callId
+        if (!id && callSid) id = ((await apiClient.callBySid(callSid)) as { id: number }).id
+        const match = id ? ((await apiClient.getCall(id)) as CallLogEntry) : null
         if (!stopped && match) setLogEntry(match)
-        if (match?.summary || attempts >= LOOKUP_ATTEMPTS) done()
+        if ((match && match.status !== 'in-progress' && match.summary) || attempts >= LOOKUP_ATTEMPTS) done()
       } catch {
         if (attempts >= LOOKUP_ATTEMPTS) done()
       }
@@ -119,8 +111,6 @@ export function CallAgentPage() {
     setPhase('connecting')
   }
 
-  const patientId = callAs === NEW_CALLER ? null : Number(callAs)
-
   // ---------- Direct test call (no Twilio) ----------
   const startDirect = async () => {
     resetForCall()
@@ -133,8 +123,7 @@ export function CallAgentPage() {
     }
     const call = new DirectCall({
       token,
-      patientId,
-      callerNumber: callAs === NEW_CALLER ? callerNumber.trim() : '',
+      callerNumber: callerNumber.trim(),
       announceRecording: record,
       onConnected: ({ callId: id, callSid: sid }) => {
         setCallId(id)
@@ -175,8 +164,7 @@ export function CallAgentPage() {
 
       // Sent to /twilio/clinic/inbound with the call: who to play, and whether to record
       const params: Record<string, string> = { Record: String(record) }
-      if (patientId) params.PatientId = String(patientId)
-      else if (callerNumber.trim()) params.CallerNumber = callerNumber.trim()
+      if (callerNumber.trim()) params.CallerNumber = callerNumber.trim()
       const call = await device.connect({ params })
       twilioCallRef.current = call
       call.on('accept', () => {
@@ -216,7 +204,6 @@ export function CallAgentPage() {
   const setup = status.data
   const inCall = phase === 'connecting' || phase === 'live'
   const ready = mode === 'direct' ? setup.direct_ready : setup.configured
-  const selectedPatient = patients?.find((p) => String(p.id) === callAs)
 
   return (
     <div>
@@ -271,7 +258,7 @@ export function CallAgentPage() {
               {mode === 'direct'
                 ? 'Your microphone talks straight to the agent. No Twilio account or number is needed. Nothing is recorded.'
                 : 'The call goes through Twilio to the clinic-number webhook, exactly like a real phone call.'}{' '}
-              Use headphones to avoid echo. The call appears in Call Logs as an inbound call.
+              Use headphones to avoid echo. The call appears in Call Records like any other call.
             </p>
 
             {!ready && mode === 'direct' && (
@@ -291,46 +278,27 @@ export function CallAgentPage() {
               </div>
             )}
 
-            <label className="block" htmlFor="call-as">
-              <span className="mb-1.5 block text-xs font-bold text-ink-soft">Call as</span>
-              <select
-                id="call-as"
+            <label className="block" htmlFor="caller-number">
+              <span className="mb-1.5 block text-xs font-bold text-ink-soft">Call from this number (optional)</span>
+              <input
+                id="caller-number"
                 className="field"
-                value={callAs}
+                placeholder="+91 98765 43210"
+                value={callerNumber}
                 disabled={inCall}
-                onChange={(e) => setCallAs(e.target.value)}
-              >
-                <option value={NEW_CALLER}>New caller (not a patient)</option>
-                {patients?.map((p) => (
-                  <option key={p.id} value={String(p.id)}>
-                    {p.first_name} {p.last_name} · {p.phone_number}
-                  </option>
-                ))}
-              </select>
+                onChange={(e) => setCallerNumber(e.target.value)}
+              />
+              <span className="mt-1 block text-xs text-ink-muted">
+                The agent treats the call as coming from this number, like caller ID on a real call, and offers to use it for the
+                callback. Leave it empty to test a caller whose number is hidden. Nobody is dialled automatically.
+              </span>
             </label>
 
-            {callAs === NEW_CALLER ? (
-              <label className="block" htmlFor="caller-number">
-                <span className="mb-1.5 block text-xs font-bold text-ink-soft">Caller’s phone number (optional)</span>
-                <input
-                  id="caller-number"
-                  className="field"
-                  placeholder="+91 98765 43210"
-                  value={callerNumber}
-                  disabled={inCall}
-                  onChange={(e) => setCallerNumber(e.target.value)}
-                />
-                <span className="mt-1 block text-xs text-ink-muted">
-                  If it matches a patient’s number, the agent treats the call as coming from that number. If you ask
-                  for a callback, the agent will really call this number later, so use your own or leave it empty.
-                </span>
-              </label>
-            ) : (
-              <p className="text-xs text-ink-muted">
-                The agent sees the call as coming from {selectedPatient?.phone_number || 'this patient’s number'}. It
-                still asks who it is speaking with before discussing their care.
-              </p>
-            )}
+            <div className="note text-[12.5px]">
+              Try the scenarios from the brief: book a General Physician for tomorrow around 5 PM; ask whether there is a cardiologist and
+              when; say you tried calling earlier and want a callback for Dr. Agarwal; ask to speak to a person. Answer the language
+              question with English, Hindi or Telugu.
+            </div>
 
             <label className="flex cursor-pointer items-center gap-2.5 text-sm text-ink" htmlFor="record-call">
               <input
@@ -403,27 +371,49 @@ export function CallAgentPage() {
             )}
             {logEntry && (
               <>
-                <div className="flex flex-wrap items-center gap-3">
-                  <b className="text-ink">Call {logEntry.id}</b>
-                  <OutcomeBadge outcome={logEntry.outcome} />
-                  {logEntry.warning_signs_detected && (
-                    <span className="pill pill-bad">
-                      <Icon name="alert" className="h-3.5 w-3.5" /> Warning signs
-                    </span>
-                  )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <b className="text-ink">{logEntry.call_ref}</b>
+                  <BookingBadge status={logEntry.booking_status} />
+                  {logEntry.status === 'transferred' && <span className="pill violet">Transferred</span>}
+                </div>
+                <div className="kv !grid-cols-2 text-[13px]">
+                  <div>
+                    <span className="lbl">Caller</span>
+                    <b>{logEntry.patient_saved_name || logEntry.patient_name || '—'}</b>
+                  </div>
+                  <div>
+                    <span className="lbl">Language</span>
+                    <b>{logEntry.language ? LANGUAGE_LABELS[logEntry.language] : '—'}</b>
+                  </div>
+                  <div>
+                    <span className="lbl">Intent</span>
+                    <b>{logEntry.intent ? INTENT_LABELS[logEntry.intent] || logEntry.intent : '—'}</b>
+                  </div>
+                  <div>
+                    <span className="lbl">Doctor</span>
+                    <b>{logEntry.doctor_requested || '—'}</b>
+                  </div>
+                  <div>
+                    <span className="lbl">Preferred slot</span>
+                    <b>{logEntry.preferred_slot || '—'}</b>
+                  </div>
+                  <div>
+                    <span className="lbl">Next action</span>
+                    <b>{logEntry.next_action || '—'}</b>
+                  </div>
                 </div>
                 {logEntry.summary ? (
                   <p className="leading-relaxed text-ink-soft">{logEntry.summary}</p>
                 ) : (
-                  <p className="text-ink-muted">{lookupDone ? 'No summary was produced for this call.' : 'Writing the summary…'}</p>
+                  <p className="text-ink-muted">{lookupDone ? 'No summary was produced for this call.' : 'Writing the call record…'}</p>
                 )}
-                {logEntry.transcript && (
+                {logEntry.turns.length > 0 && (
                   <div className="max-h-80 overflow-y-auto rounded-[10px] border border-line-soft bg-card-2 p-4">
-                    <TranscriptView transcript={logEntry.transcript} agentName={setup.agent_name} />
+                    <TranscriptView transcript={logEntry.turns.map((t) => `${t.role.toUpperCase()}: ${t.content}`).join('\n')} agentName={setup.agent_name} />
                   </div>
                 )}
-                <Link to="/calls" className="inline-flex items-center gap-1 font-bold text-brand-700 hover:underline">
-                  Open Call Logs <Icon name="chevronRight" className="h-4 w-4" />
+                <Link to="/calls/$id" params={{ id: String(logEntry.id) }} className="inline-flex items-center gap-1 font-bold text-brand-700 hover:underline">
+                  Open in Call Records <Icon name="chevronRight" className="h-4 w-4" />
                 </Link>
               </>
             )}

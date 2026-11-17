@@ -4,11 +4,11 @@ import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { PatientListPage } from './pages/PatientListPage'
 import { PatientDetailPage } from './pages/PatientDetailPage'
-import { DiseasesPage } from './pages/DiseasesPage'
-import { EscalationQueuePage } from './pages/EscalationQueuePage'
-import { EscalationDetailPage } from './pages/EscalationDetailPage'
+import { KnowledgePage } from './pages/KnowledgePage'
+import { FollowUpsPage } from './pages/FollowUpsPage'
 import { AppointmentsPage } from './pages/AppointmentsPage'
 import { CallsPage } from './pages/CallsPage'
+import { CallDetailPage } from './pages/CallDetailPage'
 import { DoctorsPage } from './pages/DoctorsPage'
 import { CallAgentPage } from './pages/CallAgentPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -49,24 +49,18 @@ const patientDetailRoute = new Route({
   component: PatientDetailPage,
 })
 
-// Chronic conditions + care plan schedules
-const diseasesRoute = new Route({
+// Clinic knowledge base (services, FAQs, policies the agent may share)
+const knowledgeRoute = new Route({
   getParentRoute: () => rootRoute,
-  path: '/diseases',
-  component: DiseasesPage,
+  path: '/knowledge',
+  component: KnowledgePage,
 })
 
-// Escalations
-const escalationListRoute = new Route({
+// Follow-ups: people clinic staff must call back
+const followUpsRoute = new Route({
   getParentRoute: () => rootRoute,
-  path: '/escalations',
-  component: EscalationQueuePage,
-})
-
-const escalationDetailRoute = new Route({
-  getParentRoute: () => rootRoute,
-  path: '/escalations/$id',
-  component: EscalationDetailPage,
+  path: '/follow-ups',
+  component: FollowUpsPage,
 })
 
 // Appointments
@@ -76,11 +70,18 @@ const appointmentListRoute = new Route({
   component: AppointmentsPage,
 })
 
-// Calls (inbound + outbound)
+// Call records
 const callListRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/calls',
   component: CallsPage,
+})
+
+// One call: record, summary, next steps, transcript, recording
+const callDetailRoute = new Route({
+  getParentRoute: () => rootRoute,
+  path: '/calls/$id',
+  component: CallDetailPage,
 })
 
 // Doctors
@@ -109,11 +110,11 @@ const routeTree = rootRoute.addChildren([
   dashboardRoute,
   patientListRoute,
   patientDetailRoute,
-  diseasesRoute,
-  escalationListRoute,
-  escalationDetailRoute,
+  knowledgeRoute,
+  followUpsRoute,
   appointmentListRoute,
   callListRoute,
+  callDetailRoute,
   doctorsRoute,
   callAgentRoute,
   settingsRoute,

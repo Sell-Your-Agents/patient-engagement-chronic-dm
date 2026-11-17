@@ -1,331 +1,195 @@
 import { useState } from 'react'
-import { Link, useParams, useNavigate } from '@tanstack/react-router'
-import { useInitiateCall } from '../hooks/usePatients'
-import { useCallbacks, useFollowUpCall, type Call } from '../hooks/useCalls'
+import { Link, useParams } from '@tanstack/react-router'
+import { usePatient, usePatientFollowUps } from '../hooks/usePatients'
+import { useCallPage, INTENT_LABELS, LANGUAGE_LABELS } from '../hooks/useCalls'
 import { useAppointments } from '../hooks/useAppointments'
-import { useClinicInfo } from '../hooks/useClinic'
-import { usePatientRoster, careTone } from '../hooks/usePatientRoster'
-import { Icon } from '../components/Icon'
-import {
-  PageHeader,
-  Panel,
-  Loader,
-  ErrorState,
-  EmptyState,
-  Avatar,
-  Spinner,
-  StatusBadge,
-  SeverityBadge,
-  DirectionLabel,
-  Modal,
-  Drawer,
-  friendlyTime,
-  formatLength,
-  formatDateTime,
-  paginate,
-  Pagination,
-} from '../components/ui'
-import { OutcomeBadge, UrgencyBadge, TranscriptView } from '../components/clinic'
+import { followUpOutcome } from '../hooks/useFollowUps'
+import { PageHeader, Panel, Loader, ErrorState, EmptyState, Avatar, friendlyTime, formatDateTime, formatDate, formatLength, utcDate } from '../components/ui'
+import { AppointmentStatusBadge } from '../components/clinic'
 import { PatientFormModal } from '../components/PatientForm'
-import { toast, errorText } from '../components/toast'
+import { MoreText } from '../components/MoreText'
+import { Icon, type IconName } from '../components/Icon'
 
-const LANG: Record<string, string> = { en: 'English', hi: 'Hindi', te: 'Telugu', ta: 'Tamil', kn: 'Kannada', ml: 'Malayalam' }
-const MISSED = ['no-answer', 'no_answer', 'failed', 'busy']
+type Filter = 'all' | 'calls' | 'appointments' | 'followups'
 
-function intervalLabel(days: number, minutes?: number | null) {
-  if (minutes) return `Every ${minutes} min`
-  if (days % 7 === 0) return days === 7 ? 'Every week' : `Every ${days / 7} weeks`
-  return days === 1 ? 'Every day' : `Every ${days} days`
+type Entry = {
+  key: string
+  kind: Exclude<Filter, 'all'>
+  /** UTC ms, for sorting newest first */
+  at: number
+  when: string
+  icon: IconName
+  title: string
+  detail: string
+  right: React.ReactNode
 }
 
-function toLocalInput(date: Date) {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-function CallType({ c }: { c: Call }) {
-  if (c.warning_signs_detected) return <span className="pill bad">Warning signs</span>
-  if (MISSED.includes(c.status)) return <span className="pill warn">Missed</span>
-  return <span className="pill mute">Normal</span>
-}
-
+/** One person's whole story: who they are, what is still open, and a single timeline of calls, appointments and follow-ups. */
 export function PatientDetailPage() {
-  const navigate = useNavigate()
-  const { id } = useParams({ strict: false }) as { id?: string }
+  const { id } = useParams({ from: '/patients/$id' })
   const patientId = Number(id)
-  const { rows, isLoading, error, refetch } = usePatientRoster()
-  const { data: callbacks } = useCallbacks()
-  const { data: appointments } = useAppointments({ patient_id: patientId })
-  const { data: info } = useClinicInfo()
-  const { mutate: initiateCall, isPending } = useInitiateCall()
-  const followUp = useFollowUpCall()
-  const [page, setPage] = useState(1)
-  const [scheduling, setScheduling] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [openCall, setOpenCall] = useState<number | null>(null)
-  const [when, setWhen] = useState('')
-  const [note, setNote] = useState('')
+  const [filter, setFilter] = useState<Filter>('all')
+  const { data: p, isLoading, error, refetch } = usePatient(patientId)
+  const { data: calls } = useCallPage({ page: 1, page_size: 100, patient_id: patientId })
+  const { data: appointments } = useAppointments({ patient_id: patientId })
+  const { data: followUps } = usePatientFollowUps(patientId)
 
   if (isLoading) return <Loader text="Loading patient…" variant="detail" />
-  const row = rows.find((r) => r.patient.id === patientId)
-  if (error || !row) return <ErrorState text="Could not load this patient" onRetry={() => refetch()} />
+  if (error || !p) return <ErrorState text="Could not load this patient" onRetry={() => refetch()} />
 
-  const { patient, name, plans, primaryPlan, calls, lastCall, openEscalations, status } = row
-  const lastSummary = calls.find((c) => c.summary)
-  const nextCallback = (callbacks || [])
-    .filter((c) => c.patient_id === patientId && (c.status === 'pending' || c.status === 'calling'))
-    .sort((a, b) => a.scheduled_time.localeCompare(b.scheduled_time))[0]
-  const nextVisit = (appointments || [])
-    .filter((a) => a.start_at && new Date(a.start_at).getTime() > Date.now() && a.status !== 'cancelled')
-    .sort((a, b) => a.start_at!.localeCompare(b.start_at!))[0]
-  const paged = paginate(calls, page, setPage, 6)
-  const warnings = calls.filter((c) => c.warning_signs_detected).length
-  const selected = calls.find((c) => c.id === openCall)
-  const selectedAppts = (appointments || []).filter((a) => selected && a.call_log_id === selected.id)
+  // Only counts here: staff act on these on the Appointments and Follow-ups pages
+  const pendingAppointments = (appointments || []).filter((a) => a.status === 'pending').length
+  const openFollowUps = (followUps || []).filter((f) => f.status === 'pending' && f.kind !== 'confirm_appointment').length
 
-  const callNow = () =>
-    initiateCall(
-      { patient_id: patientId },
-      {
-        onSuccess: () => toast.success('Calling now', `The agent is calling ${name}`),
-        onError: (err) => toast.error('Could not start the call', errorText(err, 'Please try again.')),
-      },
-    )
-
-  const schedule = () => {
-    if (!lastCall || !when) return
-    followUp.mutate(
-      { callId: lastCall.id, scheduled_time: when, reason: note.trim() || undefined },
-      {
-        onSuccess: (cb) => {
-          toast.success('Callback scheduled', `${name} · ${formatDateTime(cb.scheduled_time)}`)
-          setScheduling(false)
-          setWhen('')
-          setNote('')
-        },
-        onError: (err) => toast.error('Could not schedule the callback', errorText(err, 'Please try again.')),
-      },
-    )
+  // ---- Timeline: calls, appointments and follow-ups together, newest first ----
+  const entries: Entry[] = []
+  for (const c of calls?.items || []) {
+    entries.push({
+      key: `c${c.id}`,
+      kind: 'calls',
+      at: utcDate(c.started_at || c.created_at).getTime(),
+      when: friendlyTime(c.started_at || c.created_at, true),
+      icon: 'phone',
+      title: `Call ${c.call_ref}${c.intent ? ` · ${INTENT_LABELS[c.intent] || c.intent}` : ''}`,
+      detail: [c.summary || c.outcome || (c.status === 'in-progress' ? 'Live now' : 'No summary'), c.duration_seconds ? formatLength(c.duration_seconds) : '']
+        .filter(Boolean)
+        .join(' · '),
+      right: (
+        <Link to="/calls/$id" params={{ id: String(c.id) }} className={`btn sm ${c.status === 'in-progress' ? '!border-ok !bg-ok !text-white' : ''}`}>
+          {c.status === 'in-progress' ? 'Watch live' : 'View'}
+        </Link>
+      ),
+    })
   }
+  for (const a of appointments || []) {
+    entries.push({
+      key: `a${a.id}`,
+      kind: 'appointments',
+      at: utcDate(a.created_at).getTime(),
+      when: friendlyTime(a.created_at, true),
+      icon: 'calendar',
+      title: `Appointment · ${a.doctor_id ? a.doctor_name : a.doctor_requested || 'doctor not chosen'}`,
+      detail: [a.start_at ? formatDateTime(a.start_at) : a.preferred_time ? `Asked for ${a.preferred_time}` : 'No time yet', a.reason].filter(Boolean).join(' · '),
+      right: <AppointmentStatusBadge status={a.status} />,
+    })
+  }
+  for (const f of followUps || []) {
+    if (f.kind === 'confirm_appointment') continue // shown as its appointment
+    entries.push({
+      key: `f${f.id}`,
+      kind: 'followups',
+      at: utcDate(f.created_at).getTime(),
+      when: friendlyTime(f.created_at, true),
+      icon: 'phoneCall',
+      title: `Follow-up · ${followUpOutcome(f)}`,
+      detail: [f.reason, f.staff_notes ? `Note: ${f.staff_notes}` : ''].filter(Boolean).join(' · ') || '—',
+      right: (
+        <span className={`pill ${f.status === 'pending' ? 'warn' : f.status === 'done' ? 'ok' : 'mute'}`}>
+          {f.status === 'pending' ? 'To do' : f.status === 'done' ? 'Done' : 'Closed'}
+        </span>
+      ),
+    })
+  }
+  entries.sort((x, y) => y.at - x.at)
+  const shown = filter === 'all' ? entries : entries.filter((e) => e.kind === filter)
+  const lastCall = calls?.items?.[0]
 
   return (
-    <div>
-      <PageHeader title="Patient dashboard" back={{ to: '/patients', label: 'All patients' }} />
+    <div className="lg:flex lg:h-[calc(100dvh-70px)] lg:flex-col">
+      <PageHeader title={p.name} back={{ to: '/patients', label: 'Patients' }} />
 
-      {/* Identity + actions */}
-      <div className="card mb-3.5 flex flex-wrap items-center gap-[18px] px-5 py-[18px]">
-        <Avatar name={name} size={64} />
-        <div className="min-w-[200px] flex-1">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h2 className="text-2xl font-black">{name}</h2>
-            <span className={`pill ${careTone(status)} dotted`}>{status}</span>
-            {warnings > 0 && <span className="pill bad">{warnings} warning call{warnings === 1 ? '' : 's'}</span>}
-          </div>
-          <p className="mt-1 text-[15px] text-ink-soft">
-            {patient.mrn} · {patient.phone_number} · {LANG[patient.preferred_language] || patient.preferred_language.toUpperCase()}
-          </p>
+      {/* Who they are */}
+      <div className="card mb-3.5 flex shrink-0 flex-wrap items-center gap-4 p-4">
+        <Avatar name={p.name} size={52} />
+        <div className="min-w-0 flex-1">
+          <b className="block truncate text-[18px]">{p.name}</b>
+          <span className="text-[13px] text-ink-soft">
+            {p.phone_number} · Patient since {formatDate(utcDate(p.created_at).toISOString())}
+          </span>
+          {(pendingAppointments > 0 || openFollowUps > 0) && (
+            <span className="mt-1 flex flex-wrap gap-2 text-[12.5px] font-bold">
+              {pendingAppointments > 0 && (
+                <Link to="/appointments" className="pill warn hover:underline">
+                  {pendingAppointments} appointment{pendingAppointments === 1 ? '' : 's'} pending →
+                </Link>
+              )}
+              {openFollowUps > 0 && (
+                <Link to="/follow-ups" className="pill warn hover:underline">
+                  {openFollowUps} follow-up{openFollowUps === 1 ? '' : 's'} to do →
+                </Link>
+              )}
+            </span>
+          )}
         </div>
-        <div className="flex flex-wrap gap-2.5">
-          <button className="btn" onClick={() => setEditing(true)}>
-            <Icon name="edit" className="h-4 w-4" /> Edit
-          </button>
-          <button className="btn" disabled={!lastCall} title={lastCall ? 'Schedule a callback' : 'Available after the first call'} onClick={() => setScheduling(true)}>
-            <Icon name="calendar" className="h-4 w-4" /> Schedule callback
-          </button>
-          <Link to="/appointments" className="btn">
-            Book visit
-          </Link>
-          <button className="btn p" disabled={isPending} onClick={callNow}>
-            {isPending ? <Spinner /> : <Icon name="phone" className="h-4 w-4" />} Call now
-          </button>
+        <div className="flex flex-wrap gap-2">
+          <Stat label="Saved language" value={LANGUAGE_LABELS[p.preferred_language] || p.preferred_language} />
+          <Stat label="Calls" value={String(p.call_count)} />
+          <Stat label="Last call" value={lastCall ? friendlyTime(lastCall.started_at || lastCall.created_at, true) : '—'} />
         </div>
+        <button className="btn" onClick={() => setEditing(true)}>
+          <Icon name="edit" className="h-4 w-4" /> Edit
+        </button>
+        {p.notes && <p className="w-full text-[13px] text-ink-soft">Note: {p.notes}</p>}
       </div>
 
-      {/* Left half: doctor, disease, care plan. Right half: next steps */}
-      <div className="mb-3.5 grid gap-3.5 lg:grid-cols-2">
-        <div className="grid gap-3.5 sm:grid-cols-3">
-          <div className="card px-4 py-4">
-            <div className="lbl">Consulting doctor</div>
-            {primaryPlan?.assigned_physician_name ? (
-              <>
-                <div className="mt-2.5">
-                  <Avatar name={primaryPlan.assigned_physician_name} size={34} />
-                </div>
-                <b className="mt-2 block leading-snug">{primaryPlan.assigned_physician_name}</b>
-                <small className="text-ink-muted">Assigned physician</small>
-              </>
-            ) : (
-              <b className="mt-2.5 block text-ink-muted">Not assigned</b>
-            )}
-          </div>
-          <div className="card px-4 py-4">
-            <div className="lbl">Disease</div>
-            <b className="mt-2.5 block text-[17px] font-black leading-snug">{primaryPlan?.condition || 'No care plan'}</b>
-            {primaryPlan && <small className="mt-1 block capitalize text-ink-muted">Severity: {primaryPlan.severity || '—'}</small>}
-            {plans.length > 1 && <small className="block text-ink-muted">+{plans.length - 1} more condition{plans.length > 2 ? 's' : ''}</small>}
-          </div>
-          <div className="card px-4 py-4">
-            <div className="lbl">Care plan</div>
-            <b className="mt-2.5 block text-[17px] font-black leading-snug">
-              {primaryPlan ? intervalLabel(primaryPlan.followup_interval_days, primaryPlan.followup_interval_minutes) : '—'}
-            </b>
-            <small className="mt-1 block text-ink-muted">Next: {primaryPlan ? friendlyTime(primaryPlan.next_due_date, true) : '—'}</small>
-            <small className="block text-ink-muted">Last: {lastCall ? friendlyTime(lastCall.started_at || lastCall.created_at, true) : 'No calls yet'}</small>
-          </div>
-        </div>
-
+      <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+        {/* Everything that happened */}
         <Panel
-          title="Next steps"
+          className="flex min-h-0 min-w-0 flex-col lg:flex-1"
+          title="Timeline"
+          subtitle="Calls, appointments and follow-ups, newest first"
           right={
-            <span className={`pill ${openEscalations.length ? 'bad' : 'ok'}`}>
-              {openEscalations.length} open escalation{openEscalations.length === 1 ? '' : 's'}
-            </span>
+            <div className="tabs">
+              {(
+                [
+                  ['all', 'All'],
+                  ['calls', 'Calls'],
+                  ['appointments', 'Appointments'],
+                  ['followups', 'Follow-ups'],
+                ] as const
+              ).map(([k, l]) => (
+                <button key={k} className={`tab ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>
+                  {l}
+                </button>
+              ))}
+            </div>
           }
         >
-          <div className="flagrow">
-            <span className="flex items-center gap-2.5 text-ink-soft">
-              <Icon name="phoneCall" className="h-4 w-4 text-brand" /> Next callback
-            </span>
-            <b className="text-right">{nextCallback ? friendlyTime(nextCallback.scheduled_time) : 'None scheduled'}</b>
-          </div>
-          <div className="flagrow">
-            <span className="flex items-center gap-2.5 text-ink-soft">
-              <Icon name="clock" className="h-4 w-4 text-brand" /> Next check-in
-            </span>
-            <b className="text-right">{primaryPlan ? friendlyTime(primaryPlan.next_due_date, true) : '—'}</b>
-          </div>
-          <div className="flagrow">
-            <span className="flex items-center gap-2.5 text-ink-soft">
-              <Icon name="calendar" className="h-4 w-4 text-brand" /> Next consultation
-            </span>
-            <b className="text-right">{nextVisit ? `${friendlyTime(nextVisit.start_at)} · ${nextVisit.doctor_name}` : 'None booked'}</b>
-          </div>
-          {openEscalations.slice(0, 3).map((e) => (
-            <div key={e.id} className="flagrow cursor-pointer hover:bg-brand-50" onClick={() => navigate({ to: '/escalations/$id', params: { id: String(e.id) } })}>
-              <span className="min-w-0 truncate">{e.reason}</span>
-              <SeverityBadge severity={e.severity} />
+          {shown.length === 0 ? (
+            <EmptyState icon="clock" text="Nothing here yet." />
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {shown.map((e) => (
+                <div key={e.key} className="flex items-center gap-3 border-t border-line-soft px-4 py-2.5">
+                  <span className="w-[112px] shrink-0 truncate text-[12px] text-ink-muted">{e.when}</span>
+                  <span className="ico a !h-7 !w-7 shrink-0">
+                    <Icon name={e.icon} className="h-3.5 w-3.5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <b className="block truncate text-[13.5px]">{e.title}</b>
+                    <div className="text-[12.5px] text-ink-soft">
+                      <MoreText text={e.detail} limit={90} />
+                    </div>
+                  </div>
+                  <div className="flex w-[170px] shrink-0 justify-end">{e.right}</div>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </Panel>
       </div>
 
-      {lastSummary && (
-        <div className="card mb-3.5 px-[18px] py-4" style={{ borderLeft: '4px solid var(--accent)' }}>
-          <div className="lbl">Last call summary · {friendlyTime(lastSummary.started_at || lastSummary.created_at, true)}</div>
-          <p className="mt-1.5 text-[15px] leading-relaxed">{lastSummary.summary}</p>
-        </div>
-      )}
+      {editing && <PatientFormModal open patient={p} onClose={() => setEditing(false)} />}
+    </div>
+  )
+}
 
-      <Panel title="Call history" subtitle="Click a call to see what happened" right={<span className="chip">{calls.length} calls</span>}>
-        <table className="t">
-          <thead>
-            <tr>
-              <th>Call</th>
-              <th className="hidden md:table-cell">Direction</th>
-              <th>Time</th>
-              <th className="hidden md:table-cell">Length</th>
-              <th>Type</th>
-              <th className="hidden lg:table-cell">Summary</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {paged.pageItems.map((c) => (
-              <tr key={c.id} className="rowbtn" onClick={() => setOpenCall(c.id)}>
-                <td className="text-ink-muted">{c.id}</td>
-                <td className="hidden md:table-cell">
-                  <DirectionLabel direction={c.direction} />
-                </td>
-                <td className="whitespace-nowrap">{friendlyTime(c.started_at || c.created_at, true)}</td>
-                <td className="hidden md:table-cell">{formatLength(c.duration_seconds)}</td>
-                <td>
-                  <CallType c={c} />
-                </td>
-                <td className="hidden max-w-[420px] text-[13px] text-ink-soft lg:table-cell">
-                  <span className="line-clamp-2">{c.summary || '—'}</span>
-                </td>
-                <td className="text-right">
-                  <button className="btn sm">View</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {calls.length === 0 && <EmptyState icon="phone" text="No calls yet for this patient." />}
-        <Pagination paged={paged} noun="calls" />
-      </Panel>
-
-      {/* Call details */}
-      <Drawer open={!!selected} onClose={() => setOpenCall(null)} title={selected ? `Call ${selected.id}` : ''} subtitle={selected ? `${name} · ${friendlyTime(selected.started_at || selected.created_at, true)}` : ''}>
-        {selected && (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              <DirectionLabel direction={selected.direction} />
-              <StatusBadge status={selected.status} />
-              <CallType c={selected} />
-            </div>
-            <div className="kv">
-              <div>
-                <div className="lbl">Length</div>
-                <b>{formatLength(selected.duration_seconds)}</b>
-              </div>
-              <div>
-                <div className="lbl">Outcome</div>
-                <b>
-                  <OutcomeBadge outcome={selected.outcome} />
-                </b>
-              </div>
-              <div>
-                <div className="lbl">Urgency</div>
-                <b>
-                  <UrgencyBadge urgency={selected.urgency} />
-                </b>
-              </div>
-            </div>
-            {selected.warning_signs_detected && (
-              <div className="alertbox">
-                <Icon name="alert" className="h-[18px] w-[18px]" /> Warning signs detected · escalation raised
-              </div>
-            )}
-            <div>
-              <div className="lbl mb-1.5">Summary</div>
-              <p className="note">{selected.summary || 'No summary was recorded for this call.'}</p>
-            </div>
-            {selectedAppts.map((a) => (
-              <div key={a.id} className="okbox">
-                Appointment: {a.doctor_name} · {a.start_at ? formatDateTime(a.start_at) : 'to be scheduled'}
-              </div>
-            ))}
-            <div>
-              <div className="lbl mb-2">Conversation</div>
-              {selected.transcript ? <TranscriptView transcript={selected.transcript} agentName={info?.agent_name || 'Agent'} /> : <p className="text-ink-muted">No conversation recorded for this call.</p>}
-            </div>
-          </>
-        )}
-      </Drawer>
-
-      <Modal open={scheduling} onClose={() => setScheduling(false)} title="Schedule a callback" subtitle={name}>
-        <div className="space-y-3">
-          <label className="block">
-            <span className="lbl mb-1.5 block">Call back at</span>
-            <input type="datetime-local" className="field" value={when} min={toLocalInput(new Date())} onChange={(e) => setWhen(e.target.value)} />
-          </label>
-          <label className="block">
-            <span className="lbl mb-1.5 block">Note for the agent (optional)</span>
-            <input className="field" value={note} maxLength={500} placeholder="e.g. check the new dose" onChange={(e) => setNote(e.target.value)} />
-          </label>
-          <div className="flex justify-end gap-2 pt-2">
-            <button className="btn" onClick={() => setScheduling(false)}>
-              Cancel
-            </button>
-            <button className="btn p" disabled={!when || followUp.isPending} onClick={schedule}>
-              {followUp.isPending && <Spinner />} Schedule
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {editing && <PatientFormModal open patient={patient} onClose={() => setEditing(false)} />}
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[10px] border border-line-soft bg-card-2 px-3 py-1.5">
+      <span className="lbl !text-[10px]">{label}</span>
+      <b className="block text-[13px]">{value}</b>
     </div>
   )
 }

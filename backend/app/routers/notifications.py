@@ -1,10 +1,9 @@
 """Notifications for the bell in the header.
 
 Built live from the records that need staff attention, so nothing can go stale:
-  * Clinical alerts   - escalations that are open or acknowledged, plus a reminder when one
-                        stays unacknowledged too long for its severity
-  * Callbacks         - callbacks that are due now, and callbacks nobody answered (failed)
-  * Appointments      - appointment requests waiting to be confirmed
+  * Follow-ups    - people waiting for a call back (urgent ones first), plus a reminder when an
+                    urgent / high one waits too long
+  * Appointments  - appointment requests pending confirmation
 
 Read/unread is stored per user in notification_reads.
 """
@@ -20,32 +19,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import get_current_user
 from app.config import get_settings
 from app.database import get_db
-from app.models.appointment import Appointment
-from app.models.callback_schedule import CALLBACK_FAILED, CALLBACK_PENDING, CallbackSchedule
-from app.models.escalation import Escalation
+from app.models.appointment import STATUS_PENDING, Appointment
+from app.models.callback_schedule import FOLLOWUP_PENDING, KIND_CONFIRM_APPOINTMENT, FollowUp
 from app.models.notification import NotificationClear, NotificationRead
-from app.models.patient import Patient
 from app.models.user import User
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 settings = get_settings()
 
-# How long an escalation may stay unacknowledged before a reminder appears
-ACK_DEADLINE = {
-    "urgent": timedelta(minutes=15),
-    "critical": timedelta(minutes=15),
-    "high": timedelta(hours=1),
-    "medium": timedelta(hours=4),
-    "low": timedelta(hours=24),
-}
-# Failed callbacks and acknowledged escalations stop showing after this long
-LOOKBACK = timedelta(days=14)
+# How long an urgent / high follow-up may wait before a reminder appears
+REMIND_AFTER = {"urgent": timedelta(minutes=15), "high": timedelta(hours=1)}
 MAX_ITEMS = 60
+KIND_LABELS = {
+    "emergency": "Emergency: told to call 108",
+    "distress": "Caller in distress",
+    "human_assistance": "Asked for staff",
+    "unanswered_question": "Question not answered",
+    "callback": "Callback requested",
+    "staff": "Added by staff",
+}
+SEVERITY = {"urgent": "urgent", "high": "high", "normal": "medium"}
 
 
 class Notification(BaseModel):
     key: str
-    group: Literal["clinical", "callback", "appointment"]
+    group: Literal["followup", "appointment"]
     kind: str
     severity: Literal["urgent", "high", "medium", "low", "info"]
     title: str
@@ -55,7 +53,7 @@ class Notification(BaseModel):
     link: str
     #: The record an inline action works on
     ref_id: int
-    action: Optional[Literal["acknowledge", "call_now", "confirm"]] = None
+    action: Optional[Literal["done"]] = None
     needs_action: bool
     read: bool
 
@@ -70,135 +68,52 @@ class MarkRead(BaseModel):
     keys: List[str] = Field(default_factory=list, max_length=200)
 
 
-def _clinic_to_utc(local: datetime) -> datetime:
-    """Callback and appointment times are naive clinic-local; convert to naive UTC."""
-    return local - timedelta(minutes=settings.clinic_utc_offset_minutes)
-
-
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 async def _build(db: AsyncSession, user: User) -> List[Notification]:
     now = _utc_now()
-    since = now - LOOKBACK
     items: List[dict] = []
 
-    # Patient names for escalations (escalations only store patient_id)
-    names = {p.id: f"{p.first_name} {p.last_name}" for p in (await db.execute(select(Patient))).scalars()}
-
-    # ---- Clinical alerts ----
-    escalations = (
+    # ---- Follow-ups (appointment confirmations are shown as appointment requests below) ----
+    tasks = (
         await db.execute(
-            select(Escalation)
-            .where(Escalation.status.in_(("open", "acknowledged")))
-            .order_by(Escalation.created_at.desc())
+            select(FollowUp).where(FollowUp.status == FOLLOWUP_PENDING, FollowUp.kind != KIND_CONFIRM_APPOINTMENT)
         )
     ).scalars().all()
-    for e in escalations:
-        sev = (e.severity or "medium").lower()
-        sev = sev if sev in ("urgent", "high", "medium", "low") else ("urgent" if sev == "critical" else "medium")
-        who = names.get(e.patient_id, "New caller") if e.patient_id else "New caller"
-        is_open = e.status == "open"
-        if e.status == "acknowledged" and e.created_at < since:
+    for t in tasks:
+        who = t.patient_name or t.phone_number or "Caller"
+        label = KIND_LABELS.get(t.kind, "Follow-up")
+        if t.kind == "human_assistance" and t.transfer_status == "not_answered":
+            label = "Asked for staff: no one answered"
+        sev = SEVERITY.get(t.priority, "medium")
+        details = " · ".join(x for x in (t.reason, t.doctor_requested, t.preferred_time) if x) or "Please call back"
+        remind = REMIND_AFTER.get(t.priority)
+        if remind and now - t.created_at > remind:
+            # Once overdue, the reminder replaces the original alert (new key, so it is unread again)
+            items.append(dict(
+                key=f"fu:{t.id}:overdue", group="followup", kind="followup_overdue", severity=sev,
+                title=f"Still waiting · {label} · {who}", body=f"{details} · waiting more than {_human(remind)}",
+                at=t.created_at + remind, link="/follow-ups", ref_id=t.id, action="done", needs_action=True,
+            ))
             continue
-        deadline = ACK_DEADLINE.get(sev, ACK_DEADLINE["medium"])
-        if is_open and now - e.created_at > deadline:
-            # One item per escalation: once overdue, the reminder replaces the original alert
-            # (new key, so it shows as unread again even if the first alert was read)
-            items.append(
-                dict(
-                    key=f"esc:{e.id}:overdue",
-                    group="clinical",
-                    kind="escalation_overdue",
-                    severity=sev,
-                    title=f"Not acknowledged · {who}",
-                    body=f"{e.reason} · waiting more than {_human(deadline)}",
-                    at=e.created_at + deadline,
-                    link=f"/escalations/{e.id}",
-                    ref_id=e.id,
-                    action="acknowledge",
-                    needs_action=True,
-                )
-            )
-            continue
-        items.append(
-            dict(
-                key=f"esc:{e.id}:raised",
-                group="clinical",
-                kind="escalation",
-                severity=sev,
-                title=f"{sev.capitalize()} escalation · {who}",
-                body=e.reason,
-                at=e.created_at,
-                link=f"/escalations/{e.id}",
-                ref_id=e.id,
-                action="acknowledge" if is_open else None,
-                needs_action=is_open,
-            )
-        )
-
-    # ---- Callbacks ----
-    callbacks = (
-        await db.execute(
-            select(CallbackSchedule).where(CallbackSchedule.status.in_((CALLBACK_PENDING, CALLBACK_FAILED)))
-        )
-    ).scalars().all()
-    for cb in callbacks:
-        who = cb.patient_name or cb.phone_number or f"Callback {cb.id}"
-        due_utc = _clinic_to_utc(cb.scheduled_time)
-        if cb.status == CALLBACK_PENDING and due_utc <= now:
-            items.append(
-                dict(
-                    key=f"cb:{cb.id}:due",
-                    group="callback",
-                    kind="callback_due",
-                    severity="high",
-                    title=f"Callback due · {who}",
-                    body=cb.notes or ("Retry after a missed check-in" if cb.schedule_type == "retry" else "Asked to be called back"),
-                    at=due_utc,
-                    link="/calls",
-                    ref_id=cb.id,
-                    action="call_now",
-                    needs_action=True,
-                )
-            )
-        elif cb.status == CALLBACK_FAILED and due_utc >= since:
-            items.append(
-                dict(
-                    key=f"cb:{cb.id}:failed",
-                    group="callback",
-                    kind="callback_failed",
-                    severity="high",
-                    title=f"Couldn't reach · {who}",
-                    body=f"No answer after {cb.max_attempts} tries. Please call them.",
-                    at=due_utc,
-                    link="/calls",
-                    ref_id=cb.id,
-                    action=None,
-                    needs_action=True,
-                )
-            )
+        items.append(dict(
+            key=f"fu:{t.id}:pending", group="followup", kind=t.kind, severity=sev,
+            title=f"{label} · {who}", body=details, at=t.created_at,
+            link="/follow-ups", ref_id=t.id, action="done", needs_action=True,
+        ))
 
     # ---- Appointment requests ----
-    requests = (await db.execute(select(Appointment).where(Appointment.status == "requested"))).scalars().all()
+    requests = (await db.execute(select(Appointment).where(Appointment.status == STATUS_PENDING))).scalars().all()
     for a in requests:
-        when = a.start_at.strftime("%a %d %b, %I:%M %p").replace(" 0", " ") if a.start_at else "time to be agreed"
-        items.append(
-            dict(
-                key=f"appt:{a.id}:requested",
-                group="appointment",
-                kind="appointment_request",
-                severity="medium",
-                title=f"Appointment request · {a.patient_name}",
-                body=f"{a.physician_name or 'Doctor'} · {when}" + (f" · {a.reason}" if a.reason else ""),
-                at=a.created_at,
-                link="/appointments",
-                ref_id=a.id,
-                action="confirm",
-                needs_action=True,
-            )
-        )
+        when = a.start_at.strftime("%a %d %b, %I:%M %p").replace(" 0", " ") if a.start_at else (a.preferred_time or "time to be agreed")
+        items.append(dict(
+            key=f"appt:{a.id}:pending", group="appointment", kind="appointment_request", severity="medium",
+            title=f"Confirm appointment · {a.patient_name}",
+            body=f"{a.doctor_requested or 'Doctor'} · {when}" + (f" · {a.reason}" if a.reason else ""),
+            at=a.created_at, link="/appointments", ref_id=a.id, action=None, needs_action=True,
+        ))
 
     read_keys = set(
         (await db.execute(select(NotificationRead.key).where(NotificationRead.user_id == user.id))).scalars().all()

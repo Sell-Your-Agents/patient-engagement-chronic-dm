@@ -182,11 +182,9 @@ class ApiClient {
     return response.data
   }
 
-  // Patient endpoints
-  async listPatients(skip = 0, limit = 50) {
-    const response = await this.client.get('/patients/', {
-      params: { skip, limit },
-    })
+  // Patients (callers)
+  async listPatients(params: { q?: string; skip?: number; limit?: number } = {}) {
+    const response = await this.client.get('/patients/', { params })
     return response.data
   }
 
@@ -195,91 +193,44 @@ class ApiClient {
     return response.data
   }
 
-  async createPatient(data: {
-    mrn: string
-    first_name: string
-    last_name: string
-    phone_number: string
-    preferred_language?: string
-  }) {
+  async createPatient(data: { name: string; phone_number: string; preferred_language?: string; notes?: string | null }) {
     const response = await this.client.post('/patients/', data)
     return response.data
   }
 
-  async updatePatient(id: number, data: {
-    first_name?: string
-    last_name?: string
-    phone_number?: string
-    preferred_language?: string
-    status?: string
-  }) {
+  async updatePatient(id: number, data: { name?: string; phone_number?: string; preferred_language?: string; notes?: string | null }) {
     const response = await this.client.patch(`/patients/${id}`, data)
     return response.data
   }
 
-  // Conditions
-  async listConditions() {
-    const response = await this.client.get('/conditions/')
+  async patientFollowUps(id: number) {
+    const response = await this.client.get(`/patients/${id}/follow-ups`)
     return response.data
   }
 
-  async getConditionsOverview() {
-    const response = await this.client.get('/conditions/overview')
-    return response.data
-  }
-
-  async updateProtocol(
-    conditionId: number,
-    data: {
-      default_followup_interval_days?: number
-      default_followup_interval_minutes?: number | null
-      default_call_time?: string | null
-      apply_to_plans?: boolean
-    }
-  ) {
-    const response = await this.client.patch(`/conditions/${conditionId}/protocol`, data)
-    return response.data
-  }
-
-  // Care Plans
-  async listPlans() {
-    const response = await this.client.get('/plans/')
-    return response.data
-  }
-
-  async updatePlan(
-    id: number,
-    data: {
-      followup_interval_days?: number
-      followup_interval_minutes?: number | null
-      next_due_date?: string
-      status?: string
-      assigned_physician_name?: string | null
-      notes?: string | null
-    }
-  ) {
-    const response = await this.client.patch(`/plans/${id}`, data)
-    return response.data
-  }
-
-  // Calls (inbound + outbound; filter with ?direction=)
-  async listCalls(params: { direction?: string; patient_id?: number; status?: string; skip?: number; limit?: number } = {}) {
+  // Call records
+  async searchCalls(params: {
+    page: number
+    page_size: number
+    q?: string
+    intent?: string
+    language?: string
+    booking_status?: string
+    patient_id?: number
+    date_from?: string
+    date_to?: string
+  }) {
     const response = await this.client.get('/calls/', { params })
     return response.data
   }
 
-  /** Server-side paged call search (Call Logs page). */
-  async searchCalls(params: {
-    page: number
-    page_size: number
-    direction?: string
-    date_from?: string
-    date_to?: string
-    name?: string
-    mrn?: string
-    phone?: string
-  }) {
-    const response = await this.client.get('/calls/page', { params })
+  async liveCalls() {
+    const response = await this.client.get('/calls/live')
+    return response.data
+  }
+
+  async callBySid(sid: string) {
+    const response = await this.client.get(`/calls/by-sid/${encodeURIComponent(sid)}`)
     return response.data
   }
 
@@ -288,38 +239,26 @@ class ApiClient {
     return response.data
   }
 
-  async initiateCall(data: {
-    patient_id: number
-    plan_id?: number
+  // Follow-ups (staff callbacks)
+  async listFollowUps(params: { status?: string; kind?: string } = {}) {
+    const response = await this.client.get('/follow-ups/', { params })
+    return response.data
+  }
+
+  async createFollowUp(data: {
+    patient_name: string
+    phone_number: string
+    reason?: string
+    doctor_requested?: string
+    preferred_time?: string
+    priority?: string
   }) {
-    const response = await this.client.post('/calls/', data)
+    const response = await this.client.post('/follow-ups/', data)
     return response.data
   }
 
-  async getCallStats(direction?: string) {
-    const response = await this.client.get('/calls/stats', { params: { direction } })
-    return response.data
-  }
-
-  // Callbacks callers asked for (and failed-call retries)
-  async listCallbacks(status?: string) {
-    const response = await this.client.get('/calls/callbacks', { params: { status } })
-    return response.data
-  }
-
-  async updateCallback(id: number, data: { status?: string; scheduled_time?: string }) {
-    const response = await this.client.patch(`/calls/callbacks/${id}`, data)
-    return response.data
-  }
-
-  // Staff follow-up on a call: callback at a set time (local clinic time), or call now
-  async followUpCall(callId: number, data: { scheduled_time?: string; reason?: string; call_now?: boolean }) {
-    const response = await this.client.post(`/calls/${callId}/callback`, data)
-    return response.data
-  }
-
-  async dialCallback(id: number) {
-    const response = await this.client.post(`/calls/callbacks/${id}/dial`)
+  async updateFollowUp(id: number, data: { status?: string; staff_notes?: string; follow_up_at?: string }) {
+    const response = await this.client.patch(`/follow-ups/${id}`, data)
     return response.data
   }
 
@@ -334,34 +273,7 @@ class ApiClient {
     return response.data
   }
 
-  // Escalations
-  async listEscalations(skip = 0, limit = 50) {
-    const response = await this.client.get('/escalations/', {
-      params: { skip, limit, status: 'open' },
-    })
-    return response.data
-  }
-
-  async getEscalation(id: number) {
-    const response = await this.client.get(`/escalations/${id}`)
-    return response.data
-  }
-
-  async updateEscalation(id: number, data: {
-    status?: string
-    assigned_to_user_id?: number
-    resolution_notes?: string
-  }) {
-    const response = await this.client.patch(`/escalations/${id}`, data)
-    return response.data
-  }
-
-  async getEscalationStats() {
-    const response = await this.client.get('/escalations/stats/summary')
-    return response.data
-  }
-
-  // Appointments (phone agent, check-in requests and staff, filtered with query params)
+  // Appointments
   async listAppointments(params: {
     patient_id?: number
     doctor_id?: number
@@ -370,38 +282,30 @@ class ApiClient {
     date_from?: string
     date_to?: string
   } = {}) {
-    const response = await this.client.get('/appointments/', { params: { limit: 1000, ...params } })
-    return response.data
-  }
-
-  async getAppointment(id: number) {
-    const response = await this.client.get(`/appointments/${id}`)
+    const response = await this.client.get('/appointments/', { params })
     return response.data
   }
 
   async createAppointment(data: {
-    patient_id: number
-    physician_name: string
-    scheduled_at: string
+    patient_name: string
+    phone_number: string
+    doctor_id: number
+    start_at: string
+    reason?: string
+    confirmed?: boolean
   }) {
     const response = await this.client.post('/appointments/', data)
     return response.data
   }
 
-  async confirmAppointment(id: number) {
-    const response = await this.client.post(`/appointments/${id}/confirm`)
+  async updateAppointment(
+    id: number,
+    data: { status?: string; doctor_id?: number; start_at?: string; staff_notes?: string },
+  ) {
+    const response = await this.client.patch(`/appointments/${id}`, data)
     return response.data
   }
 
-  async getAvailability(physicianName: string, daysAhead = 14) {
-    const response = await this.client.get(
-      `/appointments/availability/${physicianName}`,
-      { params: { days_ahead: daysAhead } }
-    )
-    return response.data
-  }
-
-  // Analytics
   // Notifications (bell)
   async listNotifications() {
     const response = await this.client.get('/notifications/')
@@ -424,26 +328,15 @@ class ApiClient {
     await this.client.post('/notifications/clear-all')
   }
 
-  async getKpis() {
-    const response = await this.client.get('/analytics/kpis')
+  // Dashboard
+  async getDashboard(days = 14) {
+    const response = await this.client.get('/analytics/dashboard', { params: { days } })
     return response.data
   }
 
-  async getKpiTrend(days = 30) {
-    const response = await this.client.get('/analytics/kpis/trend', {
-      params: { days },
-    })
-    return response.data
-  }
-
-  // Inbound clinic call agent
+  // Clinic configuration
   async getClinicInfo() {
     const response = await this.client.get('/clinic/info')
-    return response.data
-  }
-
-  async getClinicStats() {
-    const response = await this.client.get('/clinic/stats')
     return response.data
   }
 
@@ -452,16 +345,28 @@ class ApiClient {
     return response.data
   }
 
-  async getDoctorAvailability(doctorId: number, days = 7) {
-    const response = await this.client.get(`/clinic/doctors/${doctorId}/availability`, {
-      params: { days },
-    })
+  async saveDoctor(id: number | null, data: unknown) {
+    const response = id ? await this.client.put(`/clinic/doctors/${id}`, data) : await this.client.post('/clinic/doctors', data)
     return response.data
   }
 
-  async updateAppointment(id: number, status: 'cancelled' | 'completed') {
-    const response = await this.client.patch(`/appointments/${id}`, { status })
+  async getDoctorAvailability(doctorId: number, days = 7) {
+    const response = await this.client.get(`/clinic/doctors/${doctorId}/availability`, { params: { days } })
     return response.data
+  }
+
+  async listKnowledge() {
+    const response = await this.client.get('/clinic/knowledge')
+    return response.data
+  }
+
+  async saveKnowledge(id: number | null, data: unknown) {
+    const response = id ? await this.client.put(`/clinic/knowledge/${id}`, data) : await this.client.post('/clinic/knowledge', data)
+    return response.data
+  }
+
+  async deleteKnowledge(id: number) {
+    await this.client.delete(`/clinic/knowledge/${id}`)
   }
 }
 

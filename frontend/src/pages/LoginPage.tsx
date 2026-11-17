@@ -7,9 +7,9 @@ import { toast } from '../components/toast'
 import { BASE_PATH } from '../lib/paths'
 
 const HIGHLIGHTS: { icon: IconName; title: string; text: string }[] = [
-  { icon: 'phoneCall', title: 'Automated check-in calls', text: 'Voice agent follows each care plan on schedule' },
-  { icon: 'shield', title: 'Red-flag escalation', text: 'Warning signs reach the care team in minutes' },
-  { icon: 'calendar', title: 'Callbacks & bookings', text: 'Patients reschedule and book without waiting on hold' },
+  { icon: 'globe', title: 'English, Hindi, Telugu', text: 'Callers speak in the language they are comfortable with' },
+  { icon: 'calendar', title: 'Appointment requests', text: 'Captured on the call, confirmed by your team' },
+  { icon: 'phoneCall', title: 'No missed callers', text: 'Callbacks and follow-ups land on one list' },
 ]
 
 // Dark overlay keeps text readable over the photo; the accent tint ties it to the theme.
@@ -37,7 +37,7 @@ export function LoginPage() {
     try {
       await login(email, password)
       const name = useAuthStore.getState().user?.name
-      toast.success(`Welcome back${name ? `, ${name}` : ''}`, 'Signed in to the care team console')
+      toast.success(`Welcome back${name ? `, ${name}` : ''}`, 'Signed in to the clinic console')
       navigate({ to: '/' })
     } catch {
       // error shown from the store
@@ -53,24 +53,24 @@ export function LoginPage() {
         <div className="flex items-center gap-2.5">
           <BrandMark />
           <div className="brand-txt">
-            <b>PatientPulse</b>
-            <span className="!text-[#8fa1b3]">Chronic care console</span>
+            <b>Six Sigma Clinic</b>
+            <span className="!text-[#8fa1b3]">AI calling agent console</span>
           </div>
         </div>
 
         <div className="max-w-[560px]">
           <span className="glass inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold" style={{ color: 'color-mix(in srgb, var(--accent-2) 55%, white)' }}>
-            <span className="dot" /> AI care agent on duty around the clock
+            <span className="dot" /> AI receptionist answering every call
           </span>
           <h1 className="mt-5 text-[40px] font-black leading-[1.1] tracking-[-0.02em] xl:text-[46px]">
-            Every chronic patient checked on.
+            Every call answered.
             <span className="block" style={{ color: 'color-mix(in srgb, var(--accent-2) 70%, white)' }}>
-              Every warning sign caught.
+              Every request recorded.
             </span>
           </h1>
           <p className="mt-4 max-w-[480px] text-[15px] leading-relaxed text-[#c3d0dc]">
-            PatientPulse calls patients with diabetes, hypertension, COPD and asthma, records how they are doing, and brings the
-            cases that need a clinician to your team.
+            The AI calling agent answers the clinic phone, helps callers with doctors, timings and appointments, and saves a clear
+            record of every call for your team to follow up.
           </p>
 
           <svg viewBox="0 0 560 70" className="mt-7 h-14 w-full max-w-[520px]" fill="none" aria-hidden="true">
@@ -97,7 +97,7 @@ export function LoginPage() {
           </div>
         </div>
 
-        <p className="text-xs text-[#8fa1b3]">Patient information is shown only to signed-in care team members.</p>
+        <p className="text-xs text-[#8fa1b3]">Patient information is shown only to signed-in clinic staff.</p>
       </section>
 
       {/* Form */}
@@ -107,8 +107,8 @@ export function LoginPage() {
             <div className="flex items-center gap-2.5 lg:hidden">
               <BrandMark />
               <div className="brand-txt">
-                <b>PatientPulse</b>
-                <span>Care team console</span>
+                <b>Six Sigma Clinic</b>
+                <span>AI calling agent console</span>
               </div>
             </div>
             <span className="hidden lg:block" />
@@ -116,9 +116,9 @@ export function LoginPage() {
           </div>
 
           <div className="mt-6">
-            <div className="lbl !text-brand">Care team sign in</div>
+            <div className="lbl !text-brand">Clinic staff sign in</div>
             <h2 className="mt-2 text-[28px] font-black tracking-[-0.01em]">Welcome back</h2>
-            <p className="mt-1.5 text-sm text-ink-muted">Sign in to review calls, escalations and appointments.</p>
+            <p className="mt-1.5 text-sm text-ink-muted">Sign in to review calls, appointment requests and follow-ups.</p>
           </div>
 
           {error && (

@@ -24,12 +24,13 @@ async def get_current_user(
         logger.debug(f"Token validation started: {token[:50]}...")
         payload = decode_access_token(token)
         logger.debug(f"Token decoded: {payload}")
-        user_id: int = int(payload.get("sub"))
-        logger.debug(f"User ID from token: {user_id}")
-        if user_id is None:
+        sub = payload.get("sub")
+        if sub is None:
             logger.warning("No user_id in token")
             raise credentials_exception
-    except JWTError as e:
+        user_id: int = int(sub)
+        logger.debug(f"User ID from token: {user_id}")
+    except (JWTError, ValueError, TypeError) as e:
         logger.warning(f"JWT Error: {e}")
         raise credentials_exception
 

@@ -1,46 +1,29 @@
-"""REST API for the clinic dashboard: doctors, clinic stats and the shared appointment book."""
+"""Clinic-specific configuration: clinic details, doctor profiles and schedules, and the knowledge base."""
 import logging
 import re
-from datetime import datetime, timedelta, time
-from typing import List, Dict
+from datetime import datetime
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy import select, func
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.deps import get_current_user
 from app.config import get_settings
 from app.database import get_db
-from app.auth.deps import get_current_user
-from app.models.user import User
-from app.models.appointment import Appointment
-from app.models.call_log import CallLog, DIRECTION_INBOUND
 from app.models.doctor import Doctor
-from app.services.scheduling.clinic_scheduling import (
-    clinic_now,
-    get_free_slots,
-)
+from app.models.knowledge import KNOWLEDGE_CATEGORIES, ClinicKnowledge
+from app.models.user import User
+from app.services.agent.context_shared import LANGUAGE_NAMES, offered_languages
+from app.services.scheduling.clinic_scheduling import clinic_now, get_free_slots
+from app.services.voice.telephony import twilio_configured
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter(prefix="/api/clinic", tags=["clinic"])
 
-
-# ---------- Schemas ----------
-
-class DoctorResponse(BaseModel):
-    id: int
-    name: str
-    specialty: str
-    treats: str
-    working_days: List[int]
-    start_time: str
-    end_time: str
-    slot_minutes: int
-    is_active: bool
-
-    class Config:
-        from_attributes = True
+HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 def normalize_phone(raw: str) -> str:
@@ -59,7 +42,7 @@ def normalize_phone(raw: str) -> str:
     return number
 
 
-# ---------- Clinic info & stats ----------
+# ---------- Clinic info ----------
 
 @router.get("/info")
 async def clinic_info(_: User = Depends(get_current_user)) -> Dict:
@@ -67,62 +50,100 @@ async def clinic_info(_: User = Depends(get_current_user)) -> Dict:
         "clinic_name": settings.clinic_name,
         "agent_name": settings.clinic_agent_name,
         "now": clinic_now().isoformat(),
-    }
-
-
-@router.get("/stats")
-async def clinic_stats(
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-) -> Dict:
-    now = clinic_now()
-    day_start = datetime.combine(now.date(), time.min)
-    day_end = day_start + timedelta(days=1)
-
-    async def count(stmt) -> int:
-        return (await db.execute(stmt)).scalar() or 0
-
-    inbound = CallLog.direction == DIRECTION_INBOUND
-    # Appointments on the shared book that hold a real time slot (any source)
-    scheduled = Appointment.start_at.is_not(None)
-    total_calls = await count(select(func.count(CallLog.id)).where(inbound))
-    completed = await count(select(func.count(CallLog.id)).where(inbound, CallLog.status == "completed"))
-    calls_booked = await count(select(func.count(CallLog.id)).where(inbound, CallLog.outcome == "booked"))
-    known_patients = await count(select(func.count(CallLog.id)).where(inbound, CallLog.patient_id.is_not(None)))
-    booked = await count(select(func.count(Appointment.id)).where(scheduled, Appointment.status != "cancelled"))
-    today = await count(
-        select(func.count(Appointment.id)).where(
-            Appointment.status.in_(("booked", "confirmed")),
-            Appointment.start_at >= day_start,
-            Appointment.start_at < day_end,
-        )
-    )
-    upcoming = await count(
-        select(func.count(Appointment.id)).where(
-            Appointment.status.in_(("booked", "confirmed")), Appointment.start_at >= now
-        )
-    )
-    return {
-        "total_calls": total_calls,
-        "calls_completed": completed,
-        "calls_booked": calls_booked,
-        "known_patient_calls": known_patients,
-        "appointments_booked": booked,
-        "appointments_today": today,
-        "upcoming_appointments": upcoming,
-        "conversion_rate": round(calls_booked / completed * 100, 1) if completed else 0,
+        "phone": settings.clinic_phone,
+        "address": settings.clinic_address,
+        "hours": settings.clinic_hours,
+        "fees": settings.clinic_fees,
+        "emergency_number": settings.emergency_number,
+        "languages": [{"code": code, "name": LANGUAGE_NAMES[code]} for code in offered_languages()],
+        "appointment_integration": settings.appointment_integration,
+        # Callers asking for a person are transferred live (phone calls only)
+        "human_transfer": bool(settings.human_transfer_number) and twilio_configured(),
     }
 
 
 # ---------- Doctors ----------
 
+class DoctorResponse(BaseModel):
+    id: int
+    name: str
+    specialty: str
+    qualification: Optional[str]
+    treats: str
+    working_days: List[int]
+    start_time: str
+    end_time: str
+    slot_minutes: int
+    consultation_fee: Optional[str]
+    languages: Optional[str]
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+class DoctorIn(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    specialty: str = Field(min_length=2, max_length=80)
+    qualification: Optional[str] = Field(None, max_length=120)
+    treats: str = Field("", max_length=1000)
+    working_days: List[int] = Field(default_factory=list)
+    start_time: str
+    end_time: str
+    slot_minutes: int = Field(15, ge=5, le=120)
+    consultation_fee: Optional[str] = Field(None, max_length=60)
+    languages: Optional[str] = Field(None, max_length=120)
+    is_active: bool = True
+
+    @field_validator("working_days")
+    @classmethod
+    def _days(cls, value: List[int]) -> List[int]:
+        if any(day < 0 or day > 6 for day in value):
+            raise ValueError("Days are 0 (Monday) to 6 (Sunday)")
+        return sorted(set(value))
+
+    @field_validator("start_time", "end_time")
+    @classmethod
+    def _time(cls, value: str) -> str:
+        if not HHMM.match(value):
+            raise ValueError("Use HH:MM (24-hour)")
+        return value
+
+
+def _check_hours(data: DoctorIn) -> None:
+    if data.start_time >= data.end_time:
+        raise HTTPException(status_code=400, detail="End time must be after start time")
+
+
 @router.get("/doctors", response_model=List[DoctorResponse])
-async def list_doctors(
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-):
-    result = await db.execute(select(Doctor).order_by(Doctor.id))
+async def list_doctors(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    result = await db.execute(select(Doctor).order_by(Doctor.is_active.desc(), Doctor.id))
     return result.scalars().all()
+
+
+@router.post("/doctors", response_model=DoctorResponse, status_code=201)
+async def create_doctor(data: DoctorIn, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    _check_hours(data)
+    doctor = Doctor(**data.model_dump())
+    db.add(doctor)
+    await db.commit()
+    await db.refresh(doctor)
+    return doctor
+
+
+@router.put("/doctors/{doctor_id}", response_model=DoctorResponse)
+async def update_doctor(
+    doctor_id: int, data: DoctorIn, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)
+):
+    _check_hours(data)
+    doctor = await db.get(Doctor, doctor_id)
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    for key, value in data.model_dump().items():
+        setattr(doctor, key, value)
+    await db.commit()
+    await db.refresh(doctor)
+    return doctor
 
 
 @router.get("/doctors/{doctor_id}/availability")
@@ -137,3 +158,66 @@ async def doctor_availability(
         raise HTTPException(status_code=404, detail="Doctor not found")
     free = await get_free_slots(db, [doctor], days)
     return [slot.isoformat() for slot in free[doctor.id]]
+
+
+# ---------- Knowledge base ----------
+
+class KnowledgeResponse(BaseModel):
+    id: int
+    category: str
+    title: str
+    content: str
+    sort_order: int
+    is_active: bool
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class KnowledgeIn(BaseModel):
+    category: str = Field("faq", pattern="^(" + "|".join(KNOWLEDGE_CATEGORIES) + ")$")
+    title: str = Field(min_length=2, max_length=200)
+    content: str = Field(min_length=2, max_length=2000)
+    sort_order: int = 0
+    is_active: bool = True
+
+
+@router.get("/knowledge", response_model=List[KnowledgeResponse])
+async def list_knowledge(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    result = await db.execute(
+        select(ClinicKnowledge).order_by(ClinicKnowledge.category, ClinicKnowledge.sort_order, ClinicKnowledge.id)
+    )
+    return result.scalars().all()
+
+
+@router.post("/knowledge", response_model=KnowledgeResponse, status_code=201)
+async def create_knowledge(data: KnowledgeIn, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    item = ClinicKnowledge(**data.model_dump())
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+@router.put("/knowledge/{item_id}", response_model=KnowledgeResponse)
+async def update_knowledge(
+    item_id: int, data: KnowledgeIn, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)
+):
+    item = await db.get(ClinicKnowledge, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    for key, value in data.model_dump().items():
+        setattr(item, key, value)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+@router.delete("/knowledge/{item_id}", status_code=204)
+async def delete_knowledge(item_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    item = await db.get(ClinicKnowledge, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    await db.delete(item)
+    await db.commit()

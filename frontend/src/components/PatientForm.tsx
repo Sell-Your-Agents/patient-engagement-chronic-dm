@@ -7,80 +7,55 @@ const LANGUAGES: [string, string][] = [
   ['en', 'English'],
   ['hi', 'Hindi'],
   ['te', 'Telugu'],
-  ['ta', 'Tamil'],
-  ['kn', 'Kannada'],
-  ['ml', 'Malayalam'],
 ]
 
-/** Add a new patient (no `patient`) or edit an existing one. */
 export function PatientFormModal({ open, onClose, patient, onSaved }: { open: boolean; onClose: () => void; patient?: Patient; onSaved?: (p: Patient) => void }) {
   const editing = Boolean(patient)
   const create = useCreatePatient()
   const update = useUpdatePatient()
-  const [mrn, setMrn] = useState(patient?.mrn || '')
-  const [first, setFirst] = useState(patient?.first_name || '')
-  const [last, setLast] = useState(patient?.last_name || '')
+  const [name, setName] = useState(patient?.name || '')
   const [phone, setPhone] = useState(patient?.phone_number || '')
   const [lang, setLang] = useState(patient?.preferred_language || 'en')
-  const [status, setStatus] = useState(patient?.status || 'active')
+  const [notes, setNotes] = useState(patient?.notes || '')
   const [error, setError] = useState<string | null>(null)
 
   const busy = create.isPending || update.isPending
   const phoneOk = /^\+?[0-9 ()-]{7,20}$/.test(phone.trim())
-  const valid = first.trim() && last.trim() && phoneOk && (editing || mrn.trim())
+  const valid = name.trim() && phoneOk
 
   const save = (e: React.FormEvent) => {
     e.preventDefault()
     if (!valid) return
     setError(null)
-    const name = `${first.trim()} ${last.trim()}`
+    const data = { name: name.trim(), phone_number: phone.trim(), preferred_language: lang, notes: notes.trim() || null }
     const done = {
-      onSuccess: (p: unknown) => {
-        toast.success(editing ? 'Patient updated' : 'Patient added', name)
-        onSaved?.(p as Patient)
+      onSuccess: (p: Patient) => {
+        toast.success(editing ? 'Patient updated' : 'Patient added', data.name)
+        onSaved?.(p)
         onClose()
       },
-      onError: (err: unknown) => setError(errorText(err, editing ? 'Could not save the changes.' : 'Could not add the patient. Check the MRN is not already in use.')),
+      onError: (err: unknown) => setError(errorText(err, 'Could not save. Check the phone number is not already used by another patient.')),
     }
-    if (editing && patient) {
-      update.mutate(
-        { id: patient.id, updates: { first_name: first.trim(), last_name: last.trim(), phone_number: phone.trim(), preferred_language: lang, status } },
-        done,
-      )
-    } else {
-      create.mutate({ mrn: mrn.trim(), first_name: first.trim(), last_name: last.trim(), phone_number: phone.trim(), preferred_language: lang }, done)
-    }
+    if (editing && patient) update.mutate({ id: patient.id, updates: data }, done)
+    else create.mutate(data, done)
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={editing ? 'Edit patient' : 'Add patient'} subtitle={editing ? `${patient!.first_name} ${patient!.last_name} · ${patient!.mrn}` : 'Enrol a new patient in PatientPulse'}>
+    <Modal open={open} onClose={onClose} title={editing ? 'Edit patient' : 'Add patient'} subtitle={editing ? patient!.phone_number : 'Callers are added automatically after a call; add someone by hand here'}>
       <form onSubmit={save} className="space-y-3.5">
+        <label className="block">
+          <span className="lbl mb-1.5 block">Full name</span>
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+        </label>
         <div className="grid grid-cols-2 gap-3">
-          <label>
-            <span className="lbl mb-1.5 block">First name</span>
-            <input id="pf-first" className="field" value={first} onChange={(e) => setFirst(e.target.value)} required autoFocus />
-          </label>
-          <label>
-            <span className="lbl mb-1.5 block">Last name</span>
-            <input id="pf-last" className="field" value={last} onChange={(e) => setLast(e.target.value)} required />
-          </label>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <label>
-            <span className="lbl mb-1.5 block">MRN</span>
-            <input id="pf-mrn" className="field" value={mrn} onChange={(e) => setMrn(e.target.value)} placeholder="e.g. PT009" disabled={editing} required={!editing} />
-            {editing && <small className="mt-1 block text-[11.5px] text-ink-muted">The MRN can't be changed.</small>}
-          </label>
           <label>
             <span className="lbl mb-1.5 block">Phone</span>
-            <input id="pf-phone" className="field" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98480 21345" required />
+            <input className="field" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98765 43210" required />
             {phone && !phoneOk && <small className="mt-1 block text-[11.5px] text-bad">Enter a valid phone number.</small>}
           </label>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
           <label>
             <span className="lbl mb-1.5 block">Preferred language</span>
-            <select id="pf-lang" className="field" value={lang} onChange={(e) => setLang(e.target.value)}>
+            <select className="field" value={lang} onChange={(e) => setLang(e.target.value)}>
               {LANGUAGES.map(([k, v]) => (
                 <option key={k} value={k}>
                   {v}
@@ -88,17 +63,11 @@ export function PatientFormModal({ open, onClose, patient, onSaved }: { open: bo
               ))}
             </select>
           </label>
-          {editing && (
-            <label>
-              <span className="lbl mb-1.5 block">Status</span>
-              <select id="pf-status" className="field" value={status} onChange={(e) => setStatus(e.target.value)}>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-                <option value="discharged">Discharged</option>
-              </select>
-            </label>
-          )}
         </div>
+        <label className="block">
+          <span className="lbl mb-1.5 block">Notes (optional)</span>
+          <textarea className="field !h-20 py-2" value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </label>
         {error && <p className="alertbox !text-[13px]">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className="btn" onClick={onClose}>

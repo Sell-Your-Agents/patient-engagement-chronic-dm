@@ -6,8 +6,7 @@ import { Icon, type IconName } from './Icon'
 type Tab = 'all' | 'unread'
 
 const GROUP_ICON: Record<AppNotification['group'], IconName> = {
-  clinical: 'alert',
-  callback: 'phoneCall',
+  followup: 'phoneCall',
   appointment: 'calendar',
 }
 const SEV_TONE: Record<AppNotification['severity'], string> = {
@@ -75,11 +74,7 @@ export function NotificationBell() {
   const openItem = (n: AppNotification) => {
     if (!n.read) markRead.mutate([n.key])
     setOpen(false)
-    if (n.group === 'callback') {
-      ;(window as unknown as { __ppOpenCallbacks?: boolean }).__ppOpenCallbacks = true
-      navigate({ to: '/calls' })
-      window.dispatchEvent(new Event('open-callbacks'))
-    } else navigate({ to: n.link })
+    navigate({ to: n.link })
   }
 
   return (
@@ -130,7 +125,7 @@ export function NotificationBell() {
                   {g.rows.map((n) => (
                     <div key={n.key} className={`notif-item ${n.read ? '' : 'unread'}`} onClick={() => openItem(n)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && openItem(n)}>
                       <span className={`ico ${SEV_TONE[n.severity]} !h-8 !w-8`}>
-                        <Icon name={n.kind === 'callback_failed' ? 'phoneMissed' : n.kind === 'escalation_overdue' ? 'clock' : GROUP_ICON[n.group]} className="h-4 w-4" />
+                        <Icon name={n.kind === 'followup_overdue' ? 'clock' : n.kind === 'emergency' || n.kind === 'distress' ? 'alert' : GROUP_ICON[n.group]} className="h-4 w-4" />
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">

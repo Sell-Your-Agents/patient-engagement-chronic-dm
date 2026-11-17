@@ -1,43 +1,43 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '../lib/apiClient'
 
-export interface KPIs {
-  total_patients_enrolled: number
-  active_patients: number
-  engagement_rate: number
-  total_outreach_calls: number
-  completed_calls: number
-  call_completion_rate: number
-  calls_with_warnings: number
-  average_csat: number | null
-  medication_adherent_calls: number
-  confirmed_appointments: number
-  open_escalations: number
+/** Everything the dashboard shows (GET /api/analytics/dashboard). */
+export interface DashboardData {
+  days: number
+  calls_today: number
+  calls_period: number
+  total_calls: number
+  live_calls: number
+  avg_call_seconds: number | null
+  appointment_requests_period: number
+  /** Appointment requests per 100 calls in the period */
+  request_rate: number
+  pending_appointments: number
+  confirmed_upcoming: number
+  pending_follow_ups: number
+  urgent_follow_ups: number
+  /** Waiting follow-ups by kind (appointment confirmations not included) */
+  follow_ups_by_kind: Record<string, number>
+  patients: number
+  intents: Record<string, number>
+  languages: Record<string, number>
+  trend: { date: string; calls: number; requests: number }[]
+  /** About the AI agent over the period */
+  agent: {
+    conversations: number
+    handled_alone: number
+    handled_alone_rate: number
+    transferred: number
+    follow_ups_created: number
+    /** Clinic-local hour (0-23) with the most calls */
+    busiest_hour: number | null
+  }
 }
 
-export function useKpis() {
+export function useDashboard(days = 14) {
   return useQuery({
-    queryKey: ['kpis'],
-    queryFn: async () => {
-      const data = await apiClient.getKpis()
-      return data as KPIs
-    },
-    refetchInterval: 60000, // Refetch every minute
-  })
-}
-
-export function useKpiTrend(days = 30) {
-  return useQuery({
-    queryKey: ['kpi-trend', days],
-    queryFn: async () => {
-      const data = await apiClient.getKpiTrend(days)
-      return data as Array<{
-        date: string
-        calls_completed: number
-        escalations_created: number
-        average_csat: number | null
-      }>
-    },
-    refetchInterval: 300000, // Refetch every 5 minutes
+    queryKey: ['dashboard', days],
+    queryFn: async () => (await apiClient.getDashboard(days)) as DashboardData,
+    refetchInterval: 20000,
   })
 }

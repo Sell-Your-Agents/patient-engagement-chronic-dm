@@ -59,7 +59,6 @@ export function directCallUrl(): string {
 
 export interface DirectCallOptions {
   token: string
-  patientId: number | null
   callerNumber: string
   announceRecording: boolean
   /** The call was logged on the server (its id in Call Logs) */
@@ -105,7 +104,6 @@ export class DirectCall {
       ws.send(JSON.stringify({
         event: 'auth',
         token: this.options.token,
-        patient_id: this.options.patientId,
         caller_number: this.options.callerNumber,
         announce_recording: this.options.announceRecording,
       }))

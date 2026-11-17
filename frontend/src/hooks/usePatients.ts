@@ -1,80 +1,63 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../lib/apiClient'
+import type { FollowUp } from './useFollowUps'
 
 export interface Patient {
   id: number
-  mrn: string
-  first_name: string
-  last_name: string
+  name: string
   phone_number: string
+  /** en | hi | te */
   preferred_language: string
-  status: string
+  notes: string | null
+  created_at: string
+  updated_at: string
+  call_count: number
+  last_call_at: string | null
+  /** Why they called last time, e.g. appointment_booking */
+  last_call_intent?: string | null
+  open_appointments: number
 }
 
-export function usePatients(skip = 0, limit = 50) {
+export function usePatients(q = '') {
   return useQuery({
-    queryKey: ['patients', skip, limit],
-    queryFn: async () => {
-      const data = await apiClient.listPatients(skip, limit)
-      return data as Patient[]
-    },
+    queryKey: ['patients', q],
+    queryFn: async () => (await apiClient.listPatients({ q: q || undefined, limit: 500 })) as Patient[],
   })
 }
 
 export function usePatient(id: number) {
   return useQuery({
     queryKey: ['patient', id],
-    queryFn: async () => {
-      const data = await apiClient.getPatient(id)
-      return data as Patient
-    },
+    queryFn: async () => (await apiClient.getPatient(id)) as Patient,
     enabled: id > 0,
   })
 }
 
-export function useInitiateCall() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (data: { patient_id: number; plan_id?: number }) => {
-      return await apiClient.initiateCall(data)
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['calls'] })
-      queryClient.invalidateQueries({ queryKey: ['call-stats'] })
-      queryClient.invalidateQueries({ queryKey: ['kpis'] })
-    },
-  })
-}
-
-export function useUpdatePatient() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (data: {
-      id: number
-      updates: {
-        first_name?: string
-        last_name?: string
-        phone_number?: string
-        preferred_language?: string
-        status?: string
-      }
-    }) => apiClient.updatePatient(data.id, data.updates),
-    onSuccess: (_d, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['patients'] })
-      queryClient.invalidateQueries({ queryKey: ['patient', vars.id] })
-    },
+export function usePatientFollowUps(id: number) {
+  return useQuery({
+    queryKey: ['patient', id, 'follow-ups'],
+    queryFn: async () => (await apiClient.patientFollowUps(id)) as FollowUp[],
+    enabled: id > 0,
   })
 }
 
 export function useCreatePatient() {
-  const queryClient = useQueryClient()
+  const qc = useQueryClient()
   return useMutation({
-    mutationFn: (data: { mrn: string; first_name: string; last_name: string; phone_number: string; preferred_language: string }) =>
+    mutationFn: (data: { name: string; phone_number: string; preferred_language?: string; notes?: string | null }) =>
       apiClient.createPatient(data) as Promise<Patient>,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['patients'] })
-      queryClient.invalidateQueries({ queryKey: ['kpis'] })
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['patients'] }),
+  })
+}
+
+export function useUpdatePatient() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, updates }: { id: number; updates: { name?: string; phone_number?: string; preferred_language?: string; notes?: string | null } }) =>
+      apiClient.updatePatient(id, updates) as Promise<Patient>,
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: ['patients'] })
+      qc.invalidateQueries({ queryKey: ['patient', id] })
     },
   })
 }
