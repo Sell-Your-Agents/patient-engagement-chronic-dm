@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useAuthStore } from '../store/authStore'
 import { Icon, type IconName } from '../components/Icon'
+import { BrandLogo } from '../components/Brand'
 import { Spinner, ThemeToggle } from '../components/ui'
 import { toast } from '../components/toast'
 import { BASE_PATH } from '../lib/paths'
@@ -15,14 +16,6 @@ const HIGHLIGHTS: { icon: IconName; title: string; text: string }[] = [
 // Dark overlay keeps text readable over the photo; the accent tint ties it to the theme.
 const HERO_BG = {
   backgroundImage: `linear-gradient(115deg, rgba(10,22,33,.95) 0%, rgba(12,30,42,.84) 45%, color-mix(in srgb, var(--hero-2) 62%, transparent) 100%), url('${BASE_PATH}login-bg.jpg')`,
-}
-
-function BrandMark() {
-  return (
-    <span className="mark">
-      <Icon name="pulse" className="h-5 w-5 text-white" strokeWidth={2.4} />
-    </span>
-  )
 }
 
 export function LoginPage() {
@@ -50,12 +43,10 @@ export function LoginPage() {
 
       {/* Hero */}
       <section className="relative hidden flex-1 flex-col justify-between p-10 text-white lg:flex xl:p-14">
-        <div className="flex items-center gap-2.5">
-          <BrandMark />
-          <div className="brand-txt">
-            <b>Six Sigma Clinic</b>
-            <span className="!text-[#8fa1b3]">AI calling agent console</span>
-          </div>
+        <div>
+          {/* The hero is always dark: white-text logo */}
+          <BrandLogo height={52} tone="dark" />
+          <span className="mt-2.5 block text-[11px] font-bold uppercase tracking-[0.14em] text-[#8fa1b3]">AI calling agent console</span>
         </div>
 
         <div className="max-w-[560px]">
@@ -104,13 +95,11 @@ export function LoginPage() {
       <section className="login-form-side relative flex w-full items-center justify-center p-4 sm:p-8 lg:w-[520px] lg:shrink-0 xl:w-[560px]">
         <div className="login-pop w-full max-w-[400px] rounded-2xl bg-card p-7 shadow-lift sm:p-9 lg:rounded-none lg:bg-transparent lg:p-0 lg:shadow-none">
           <div className="flex items-center justify-between gap-2.5">
-            <div className="flex items-center gap-2.5 lg:hidden">
-              <BrandMark />
-              <div className="brand-txt">
-                <b>Six Sigma Clinic</b>
-                <span>AI calling agent console</span>
-              </div>
+            {/* Small screens (no hero): logo above the form, matching the theme */}
+            <div className="lg:hidden">
+              <BrandLogo height={36} />
             </div>
+            {/* Large screens: the logo is on the hero */}
             <span className="hidden lg:block" />
             <ThemeToggle />
           </div>

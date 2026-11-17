@@ -25,9 +25,9 @@ export interface Doctor {
   treats: string
   /** 0 = Monday … 6 = Sunday */
   working_days: number[]
+  /** Working hours ("HH:MM", clinic time); patients come any time within them (no fixed slots) */
   start_time: string
   end_time: string
-  slot_minutes: number
   consultation_fee: string | null
   languages: string | null
   is_active: boolean
@@ -67,19 +67,7 @@ export function useSaveDoctor() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, data }: { id: number | null; data: DoctorInput }) => apiClient.saveDoctor(id, data) as Promise<Doctor>,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['clinic', 'doctors'] })
-      qc.invalidateQueries({ queryKey: ['clinic', 'availability'] })
-    },
-  })
-}
-
-export function useDoctorAvailability(doctorId: number | null, days = 7) {
-  return useQuery({
-    queryKey: ['clinic', 'availability', doctorId, days],
-    queryFn: async () => (await apiClient.getDoctorAvailability(doctorId!, days)) as string[],
-    enabled: doctorId !== null,
-    staleTime: 60_000,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['clinic', 'doctors'] }),
   })
 }
 

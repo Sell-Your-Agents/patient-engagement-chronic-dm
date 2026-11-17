@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { useDoctors, useDoctorAvailability, useSaveDoctor, type Doctor, type DoctorInput } from '../hooks/useClinic'
+import { useDoctors, useSaveDoctor, type Doctor, type DoctorInput } from '../hooks/useClinic'
 import { useAppointments } from '../hooks/useAppointments'
-import { PageHeader, EmptyState, Loader, ErrorState, Avatar, Modal, Spinner, friendlyTime } from '../components/ui'
-import { WEEKDAYS, hhmmTo12h, localISODate, mondayIndex } from '../components/clinic'
+import { PageHeader, EmptyState, Loader, ErrorState, Avatar, Modal, Spinner } from '../components/ui'
+import { WEEKDAYS, hoursLabel, localISODate, mondayIndex } from '../components/clinic'
 import { toast, errorText } from '../components/toast'
 import { Icon } from '../components/Icon'
 
@@ -30,13 +30,14 @@ export function DoctorsPage() {
   const onDuty = (d: Doctor) => d.is_active && d.working_days.includes(today)
   const all = doctors || []
   const list = all.filter((d) => (filter === 'all' ? true : filter === 'on' ? onDuty(d) : !onDuty(d)))
-  const booked = (id: number) => (upcoming || []).filter((a) => a.doctor_id === id && (a.status === 'pending' || a.status === 'confirmed')).length
+  const booked = (id: number) =>
+    (upcoming || []).filter((a) => a.doctor_id === id && ['pending', 'confirmed', 'cancel_requested'].includes(a.status)).length
 
   return (
     <div>
       <PageHeader
         title="Doctors"
-        subtitle={`${all.filter(onDuty).length} on duty today · ${all.length} doctors · the agent only tells callers what is saved here`}
+        subtitle={`${all.filter(onDuty).length} on duty today · ${all.length} doctors · patients come any time within a doctor's working hours`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
           <div className="tabs">
@@ -74,14 +75,17 @@ export function DoctorsPage() {
   )
 }
 
+/** The doctor's next working day (today if they work today), e.g. "Today" / "Wed". */
+function nextWorkingDay(days: number[], today: number) {
+  for (let offset = 0; offset < 7; offset++) {
+    const day = (today + offset) % 7
+    if (days.includes(day)) return offset === 0 ? 'Today' : offset === 1 ? 'Tomorrow' : WEEKDAYS[day]!
+  }
+  return '—'
+}
+
 function DoctorCard({ doctor, duty, today, booked, onEdit }: { doctor: Doctor; duty: boolean; today: number; booked: number; onEdit: () => void }) {
-  const { data: slots } = useDoctorAvailability(doctor.id, 7)
-  const [showAll, setShowAll] = useState(false)
-  const next = slots?.[0]
-  const todayKey = localISODate(new Date())
-  const todaySlots = (slots || []).filter((s) => localISODate(new Date(s)) === todayKey)
-  const shown = showAll ? slots || [] : todaySlots.length ? todaySlots : (slots || []).slice(0, 6)
-  const label = todaySlots.length && !showAll ? 'Free today' : showAll ? 'Free this week' : 'Next free slots'
+  const hours = hoursLabel(doctor.start_time, doctor.end_time)
 
   return (
     <div className="card doc">
@@ -107,14 +111,8 @@ function DoctorCard({ doctor, duty, today, booked, onEdit }: { doctor: Doctor; d
           <b>{daysLabel(doctor.working_days)}</b>
         </div>
         <div>
-          <div className="lbl !text-[10px]">Hours</div>
-          <b>
-            {hhmmTo12h(doctor.start_time).replace(':00', '')} – {hhmmTo12h(doctor.end_time).replace(':00', '')}
-          </b>
-        </div>
-        <div>
-          <div className="lbl !text-[10px]">Slot</div>
-          <b>{doctor.slot_minutes} min</b>
+          <div className="lbl !text-[10px]">Working hours</div>
+          <b>{hours}</b>
         </div>
       </div>
       <div className="days">
@@ -124,35 +122,24 @@ function DoctorCard({ doctor, duty, today, booked, onEdit }: { doctor: Doctor; d
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line-soft pt-3">
         <span className="text-[13px]">
-          Next free: <b>{next ? friendlyTime(next) : slots ? 'None this week' : '…'}</b>
+          {duty ? (
+            <>
+              Available today: <b>{hours}</b>
+            </>
+          ) : (
+            <>
+              Next available: <b>{doctor.is_active ? `${nextWorkingDay(doctor.working_days, today)}, ${hours}` : '—'}</b>
+            </>
+          )}
         </span>
-        <span className="text-[12.5px] text-ink-muted">
-          {slots?.length ?? 0} free this week · {booked} held
-        </span>
+        <span className="text-[12.5px] text-ink-muted">{booked} upcoming</span>
       </div>
-      {slots && slots.length > 0 && (
-        <div>
-          <div className="lbl mb-2">{label}</div>
-          <div className={`slots ${showAll ? 'max-h-40 overflow-y-auto' : ''}`}>
-            {shown.map((s) => (
-              <span key={s} title={new Date(s).toLocaleString()}>
-                {showAll || !todaySlots.length
-                  ? new Date(s).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })
-                  : new Date(s).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
       <div className="flex gap-2">
         <Link to="/appointments" className="btn sm p flex-1">
           Appointments
         </Link>
         <button className="btn sm" onClick={onEdit}>
           <Icon name="edit" className="h-3.5 w-3.5" /> Edit
-        </button>
-        <button className="btn sm" onClick={() => setShowAll((s) => !s)} disabled={!slots?.length}>
-          {showAll ? 'Less' : 'Week view'}
         </button>
       </div>
     </div>
@@ -172,7 +159,6 @@ function DoctorModal({ doctor, onClose }: { doctor: Doctor | null; onClose: () =
           working_days: [0, 1, 2, 3, 4, 5],
           start_time: '10:00',
           end_time: '13:00',
-          slot_minutes: 15,
           consultation_fee: '',
           languages: 'English, Hindi, Telugu',
           is_active: true,
@@ -235,7 +221,7 @@ function DoctorModal({ doctor, onClose }: { doctor: Doctor | null; onClose: () =
           <input className="field" value={form.treats} onChange={(e) => set('treats', e.target.value)} placeholder="fever, cough, infections, general check-ups" />
         </label>
         <div>
-          <span className="lbl mb-1.5 block">Consultation days</span>
+          <span className="lbl mb-1.5 block">Working days</span>
           <div className="flex flex-wrap gap-1.5">
             {WEEKDAYS.map((w, i) => {
               const on = form.working_days.includes(i)
@@ -252,20 +238,17 @@ function DoctorModal({ doctor, onClose }: { doctor: Doctor | null; onClose: () =
             })}
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <label>
-            <span className="lbl mb-1.5 block">From</span>
+            <span className="lbl mb-1.5 block">Working hours from</span>
             <input type="time" className="field" value={form.start_time} onChange={(e) => set('start_time', e.target.value)} />
           </label>
           <label>
             <span className="lbl mb-1.5 block">To</span>
             <input type="time" className="field" value={form.end_time} onChange={(e) => set('end_time', e.target.value)} />
           </label>
-          <label>
-            <span className="lbl mb-1.5 block">Slot (min)</span>
-            <input type="number" min={5} max={120} className="field" value={form.slot_minutes} onChange={(e) => set('slot_minutes', Number(e.target.value) || 15)} />
-          </label>
         </div>
+        <p className="-mt-1.5 text-[12.5px] text-ink-muted">No fixed slots: patients come any time within these hours on a working day.</p>
         <div className="grid grid-cols-2 gap-3">
           <label>
             <span className="lbl mb-1.5 block">Languages spoken</span>

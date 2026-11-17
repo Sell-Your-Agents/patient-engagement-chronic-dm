@@ -6,6 +6,8 @@ The agent never dials anyone. A follow-up is created when a caller:
   - asks something the agent cannot answer                  (kind unanswered_question)
   - asks to be called back, e.g. after a missed call        (kind callback)
   - makes an appointment request staff must confirm         (kind confirm_appointment)
+  - asks to cancel an appointment (staff confirm it)        (kind cancel_request, priority high)
+  - moves an appointment to another day/time                (kind rescheduled: staff are told)
 Staff can also add one by hand (kind staff). Staff call the person, then mark it done.
 
 follow_up_at is naive local clinic time; created_at is UTC.
@@ -24,8 +26,15 @@ KIND_HUMAN = "human_assistance"
 KIND_UNANSWERED = "unanswered_question"
 KIND_CALLBACK = "callback"
 KIND_CONFIRM_APPOINTMENT = "confirm_appointment"
+KIND_CANCEL_REQUEST = "cancel_request"
+KIND_RESCHEDULED = "rescheduled"
 KIND_STAFF = "staff"
-KINDS = (KIND_EMERGENCY, KIND_DISTRESS, KIND_HUMAN, KIND_UNANSWERED, KIND_CALLBACK, KIND_CONFIRM_APPOINTMENT, KIND_STAFF)
+KINDS = (
+    KIND_EMERGENCY, KIND_DISTRESS, KIND_HUMAN, KIND_UNANSWERED, KIND_CALLBACK,
+    KIND_CONFIRM_APPOINTMENT, KIND_CANCEL_REQUEST, KIND_RESCHEDULED, KIND_STAFF,
+)
+# Follow-ups that belong to one appointment (closed when staff settle that appointment)
+APPOINTMENT_KINDS = (KIND_CONFIRM_APPOINTMENT, KIND_CANCEL_REQUEST, KIND_RESCHEDULED)
 
 PRIORITY_URGENT = "urgent"
 PRIORITY_HIGH = "high"
@@ -35,6 +44,7 @@ DEFAULT_PRIORITY = {
     KIND_EMERGENCY: PRIORITY_URGENT,
     KIND_DISTRESS: PRIORITY_URGENT,
     KIND_HUMAN: PRIORITY_HIGH,
+    KIND_CANCEL_REQUEST: PRIORITY_HIGH,
 }
 
 FOLLOWUP_PENDING = "pending"

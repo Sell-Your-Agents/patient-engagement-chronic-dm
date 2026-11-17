@@ -1,16 +1,18 @@
 """The agent's context for a call to the clinic: receptionist prompt, opening line, capabilities.
 
-The prompt lists the doctors (with their consultation hours and free slots) and the clinic
-knowledge base live from the database, so the agent can only state what the clinic has approved.
+The prompt lists the doctors (with their working days and hours) and the clinic knowledge base
+live from the database, so the agent can only state what the clinic has approved. It also lists
+the upcoming appointments booked with the number the caller is phoning from: the only ones the
+caller may hear about, move or cancel.
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models.appointment import ACTIVE_STATUSES, Appointment
+from app.models.appointment import ACTIVE_STATUSES, STATUS_CANCEL_REQUESTED, STATUS_CONFIRMED, Appointment
 from app.models.call_log import CallLog
 from app.models.callback_schedule import FOLLOWUP_PENDING, FollowUp
 from app.models.knowledge import ClinicKnowledge
@@ -28,8 +30,12 @@ from app.prompts.inbound_prompts import (
     PREVIOUS_CALLS_BLOCK,
     RECEPTIONIST_PROMPT,
     SAVED_LANGUAGE_NOTE,
+    UPCOMING_APPOINTMENTS_BLOCK,
+    UPCOMING_APPOINTMENTS_NO_NUMBER,
+    UPCOMING_APPOINTMENTS_NONE,
 )
 from app.services.agent.context_shared import (
+    CAP_APPOINTMENT_CHANGE,
     CAP_APPOINTMENT_REQUEST,
     CAP_CALLBACK,
     CAP_ESCALATE,
@@ -47,49 +53,70 @@ from app.services.agent.context_shared import (
     spoken_hhmm,
 )
 from app.services.scheduling.clinic_scheduling import (
+    calendar_text,
     clinic_now,
-    format_day,
     get_active_doctors,
-    get_free_slots,
     schedule_text,
+    visit_text,
 )
 from app.services.voice.telephony import can_transfer
 
 settings = get_settings()
 
-# Days of free slots shown to the agent per doctor (keeps the prompt small)
-PROMPT_DAYS_PER_DOCTOR = 3
 CATEGORY_LABELS = {"service": "Service", "faq": "FAQ", "policy": "Policy"}
+# Dates listed for the agent (to turn "next Friday" into a date)
+CALENDAR_DAYS = 14
+# Upcoming appointments of the caller's number shown to the agent
+UPCOMING_LIMIT = 5
 
-INBOUND_CAPABILITIES = frozenset({CAP_APPOINTMENT_REQUEST, CAP_CALLBACK, CAP_HUMAN, CAP_ESCALATE, CAP_LANGUAGE, CAP_UNANSWERED})
+INBOUND_CAPABILITIES = frozenset({
+    CAP_APPOINTMENT_REQUEST, CAP_APPOINTMENT_CHANGE, CAP_CALLBACK, CAP_HUMAN, CAP_ESCALATE, CAP_LANGUAGE, CAP_UNANSWERED,
+})
 
 
 async def _doctor_blocks(db: AsyncSession) -> str:
-    doctors = await get_active_doctors(db)
-    free = await get_free_slots(db, doctors)
-    today = clinic_now().date()
     blocks = []
-    for doctor in doctors:
-        by_day = {}
-        for slot in free.get(doctor.id, []):
-            by_day.setdefault(slot.date(), []).append(slot)
-        day_lines = [
-            f"    - {format_day(day, today)}: {', '.join(s.strftime('%H:%M') for s in by_day[day])}"
-            for day in sorted(by_day)[:PROMPT_DAYS_PER_DOCTOR]
-        ]
-        availability = "\n".join(day_lines) if day_lines else "    - No free slots in the next few days"
+    for doctor in await get_active_doctors(db):
         lines = [
             f"* {doctor.name} (doctor_id={doctor.id}), {doctor.specialty}"
             + (f", {doctor.qualification}" if doctor.qualification else ""),
-            f"  Consultation hours: {schedule_text(doctor)}; {doctor.slot_minutes}-minute appointments",
-            f"  Treats: {doctor.treats or 'not listed'}",
+            f"  Available: {schedule_text(doctor)} (patients come any time within these hours)",
+            f"  Sees patients for: {doctor.treats or 'not listed'}",
             f"  Consultation fee: {doctor.consultation_fee or 'not listed'}",
         ]
         if doctor.languages:
             lines.append(f"  Speaks: {doctor.languages}")
-        lines.append(f"  Free slots:\n{availability}")
         blocks.append("\n".join(lines))
-    return "\n".join(blocks) or "* No doctor schedules are set up. Offer a callback from the clinic team."
+    return "\n".join(blocks) or "* No doctors are set up. Offer a callback from the clinic team."
+
+
+async def _upcoming_block(db: AsyncSession, call: CallLog) -> str:
+    """Upcoming appointments booked with the caller's number: the only ones they may hear about or change."""
+    digits = last_ten_digits(call.phone_number)
+    if len(digits) < 10:
+        return UPCOMING_APPOINTMENTS_BLOCK.format(appointments=UPCOMING_APPOINTMENTS_NO_NUMBER)
+    today = datetime.combine(clinic_now().date(), datetime.min.time())
+    appointments = (await db.execute(
+        select(Appointment)
+        .where(
+            Appointment.phone_number.like(f"%{digits}"),
+            Appointment.status.in_(ACTIVE_STATUSES),
+            (Appointment.start_at >= today) | Appointment.start_at.is_(None),
+        )
+        .order_by(Appointment.start_at.is_(None), Appointment.start_at, Appointment.id)
+        .limit(UPCOMING_LIMIT)
+    )).scalars().all()
+    if not appointments:
+        return UPCOMING_APPOINTMENTS_BLOCK.format(appointments=UPCOMING_APPOINTMENTS_NONE)
+    lines = []
+    for a in appointments:
+        when = visit_text(a.start_at) if a.start_at else f"day not fixed yet (asked for: {a.preferred_time or 'not given'})"
+        status = {
+            STATUS_CONFIRMED: "confirmed by the clinic",
+            STATUS_CANCEL_REQUESTED: "cancellation requested, waiting for the clinic team",
+        }.get(a.status, "pending clinic confirmation")
+        lines.append(f"- Appointment #{a.id}: {a.patient_name} with {a.doctor_display_name}, {when} ({status})")
+    return UPCOMING_APPOINTMENTS_BLOCK.format(appointments="\n".join(lines))
 
 
 async def _knowledge_blocks(db: AsyncSession) -> str:
@@ -146,7 +173,7 @@ HISTORY_DAYS = 60
 
 
 async def _history_block(db: AsyncSession, call: CallLog) -> str:
-    """Summaries of earlier calls from the same number, and its open appointment requests / follow-ups."""
+    """Summaries of earlier calls from the same number, and its open follow-ups (appointments: _upcoming_block)."""
     digits = last_ten_digits(call.phone_number)
     if len(digits) < 10:
         return ""
@@ -174,12 +201,6 @@ async def _history_block(db: AsyncSession, call: CallLog) -> str:
         ) if x]
         lines.append(f"- {when} ({who}): {c.summary}" + (f" [{'; '.join(extras)}]" if extras else ""))
 
-    appts = (await db.execute(
-        select(Appointment)
-        .where(Appointment.phone_number.like(f"%{digits}"), Appointment.status.in_(ACTIVE_STATUSES))
-        .order_by(Appointment.id.desc())
-        .limit(3)
-    )).scalars().all()
     tasks = (await db.execute(
         select(FollowUp)
         .where(FollowUp.phone_number.like(f"%{digits}"), FollowUp.status == FOLLOWUP_PENDING, FollowUp.appointment_id.is_(None))
@@ -187,10 +208,6 @@ async def _history_block(db: AsyncSession, call: CallLog) -> str:
         .limit(3)
     )).scalars().all()
     open_items = []
-    for a in appts:
-        when = a.start_at.strftime("%a %d %b, %I:%M %p") if a.start_at else (a.preferred_time or "time not set")
-        status = "confirmed" if a.status == "confirmed" else "pending clinic confirmation"
-        open_items.append(f"- Appointment request #{a.id} for {a.patient_name} with {a.doctor_display_name}, {when} ({status})")
     for t in tasks:
         open_items.append(f"- Waiting for a clinic callback: {t.reason or t.kind.replace('_', ' ')}")
 
@@ -215,6 +232,8 @@ async def build_inbound_context(db: AsyncSession, call: CallLog, patient: Option
         phone_text=phone or "not available",
         caller_hint=CALLER_HINT_KNOWN.format(name=patient.name) if patient else CALLER_HINT_UNKNOWN,
         history_block=await _history_block(db, call),
+        upcoming_block=await _upcoming_block(db, call),
+        calendar=calendar_text(CALENDAR_DAYS),
         language_note=SAVED_LANGUAGE_NOTE.format(language_name=LANGUAGE_NAMES[patient.preferred_language])
         if patient and patient.preferred_language in LANGUAGE_NAMES and len(offered_languages()) > 1 else "",
         contact_rule=CONTACT_RULE_KNOWN.format(spoken_number=_spoken_number(phone)) if len(last_ten_digits(phone)) >= 10 else CONTACT_RULE_UNKNOWN,

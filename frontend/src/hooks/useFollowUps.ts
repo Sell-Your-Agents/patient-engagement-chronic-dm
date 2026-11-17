@@ -4,7 +4,7 @@ import { apiClient } from '../lib/apiClient'
 /** A person clinic staff must call back. */
 export interface FollowUp {
   id: number
-  /** emergency | distress | human_assistance | unanswered_question | callback | confirm_appointment | staff */
+  /** emergency | distress | human_assistance | unanswered_question | callback | confirm_appointment | cancel_request | rescheduled | staff */
   kind: string
   /** urgent | high | normal */
   priority: string
@@ -36,6 +36,8 @@ export const FOLLOW_UP_KIND_LABELS: Record<string, string> = {
   unanswered_question: 'Question not answered',
   callback: 'Callback requested',
   confirm_appointment: 'Appointment request: needs confirming',
+  cancel_request: 'Wants to cancel appointment',
+  rescheduled: 'Patient moved appointment',
   staff: 'Added by staff',
 }
 
@@ -46,6 +48,8 @@ export const FOLLOW_UP_KIND_TONE: Record<string, string> = {
   unanswered_question: 'info',
   callback: 'warn',
   confirm_appointment: 'violet',
+  cancel_request: 'bad',
+  rescheduled: 'violet',
   staff: 'mute',
 }
 

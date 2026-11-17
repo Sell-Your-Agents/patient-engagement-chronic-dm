@@ -7,6 +7,7 @@ import { useAppointments } from '../hooks/useAppointments'
 import { useClinicInfo, useDoctors } from '../hooks/useClinic'
 import { usePatients } from '../hooks/usePatients'
 import { Icon, type IconName } from '../components/Icon'
+import { BrandMarkImage, BrandWordmark } from '../components/Brand'
 import { Toaster } from '../components/toast'
 
 type Badge = 'followups' | 'appointments'
@@ -66,10 +67,12 @@ function AppShell() {
   const { data: info } = useClinicInfo()
   const { data: followUps } = useFollowUps('pending')
   const { data: pendingAppts } = useAppointments({ status: 'pending' })
+  const { data: cancelAppts } = useAppointments({ status: 'cancel_requested' })
   const urgentFollowUps = (followUps || []).some((f) => f.priority === 'urgent')
   const badges: Record<Badge, number> = {
-    followups: (followUps || []).filter((f) => f.kind !== 'confirm_appointment').length,
-    appointments: (pendingAppts || []).length,
+    // Appointment tasks are counted on Appointments (pending requests + cancel requests)
+    followups: (followUps || []).filter((f) => f.kind !== 'confirm_appointment' && f.kind !== 'cancel_request').length,
+    appointments: (pendingAppts || []).length + (cancelAppts || []).length,
   }
 
   const setMini = (v: boolean) => {
@@ -158,15 +161,15 @@ function AppShell() {
       <aside className="side">
         <div className="brand">
           <button className="brand-btn" onClick={() => mini && setMini(false)} title={mini ? 'Expand sidebar  [' : 'Clinic calling agent'} aria-label="Expand sidebar">
-            <span className="mark">
-              <Icon name="pulse" className="h-5 w-5 text-white" strokeWidth={2.4} />
+            <span className="mark-img">
+              <BrandMarkImage size={38} />
             </span>
             <span className="expand">
               <Icon name="chevronsRight" className="h-5 w-5" />
             </span>
           </button>
-          <div className="brand-txt">
-            <b>{info?.clinic_name || 'Clinic'}</b>
+          <div className="brand-txt" title={info?.clinic_name || 'Six Sigma'}>
+            <BrandWordmark height={19} />
             <span>AI calling agent console</span>
           </div>
           <button className="sb-toggle" onClick={() => setMini(true)} title="Collapse sidebar  [" aria-label="Collapse sidebar">

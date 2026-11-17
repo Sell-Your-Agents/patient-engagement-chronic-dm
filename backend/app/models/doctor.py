@@ -1,7 +1,8 @@
-"""Doctor profiles and consultation schedules (clinic-specific configuration).
+"""Doctor profiles and working hours (clinic-specific configuration).
 
-The agent only tells callers what is written here: specialty, consultation days and timings, and
-the fee when one is filled in. Staff edit these on the Doctors page.
+The agent only tells callers what is written here: specialty, working days and hours, and the fee
+when one is filled in. There are no fixed appointment slots: patients come any time within the
+doctor's working hours. Staff edit these on the Doctors page.
 """
 from datetime import datetime
 from typing import Optional
@@ -25,6 +26,7 @@ class Doctor(Base):
     working_days: Mapped[list] = mapped_column(JSON, default=list)
     start_time: Mapped[str] = mapped_column(String(5))  # "HH:MM" clinic time
     end_time: Mapped[str] = mapped_column(String(5))  # "HH:MM" clinic time
+    # Not used any more (no fixed slots); kept so existing databases keep working
     slot_minutes: Mapped[int] = mapped_column(Integer, default=15)
     # Consultation fee as the clinic wants it said (empty = the agent says it is not listed)
     consultation_fee: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)

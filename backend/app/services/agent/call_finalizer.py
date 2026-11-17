@@ -22,9 +22,11 @@ from app.models.appointment import STATUS_CONFIRMED, Appointment
 from app.models.call_log import CallLog
 from app.models.callback_schedule import (
     KIND_CALLBACK,
+    KIND_CANCEL_REQUEST,
     KIND_DISTRESS,
     KIND_EMERGENCY,
     KIND_HUMAN,
+    KIND_RESCHEDULED,
     KIND_UNANSWERED,
     TRANSFER_ANSWERED,
     TRANSFER_NOT_ANSWERED,
@@ -133,7 +135,9 @@ async def finalize_call(call_log_id: int, db: AsyncSession, transcript: str, dur
             )
 
     # ---- Safety nets ----
-    if summary.get("appointment_requested") and not appointments:
+    # A call that only moved or cancelled an existing appointment needs no new request
+    changed_existing = bool(kinds & {KIND_CANCEL_REQUEST, KIND_RESCHEDULED})
+    if summary.get("appointment_requested") and not appointments and not changed_existing:
         outcome = await record_appointment_request(
             db,
             patient_name=name or "Unknown",
@@ -201,6 +205,10 @@ async def finalize_call(call_log_id: int, db: AsyncSession, transcript: str, dur
             call.next_action = "Handled by clinic staff (transferred)"
         elif emergency:
             call.next_action = "Urgent: check on caller"
+        elif KIND_CANCEL_REQUEST in kinds:
+            call.next_action = "Confirm the cancellation with the patient"
+        elif KIND_RESCHEDULED in kinds and not any(t.status == "pending" and t.kind != KIND_RESCHEDULED for t in tasks):
+            call.next_action = "Appointment moved by the patient (check the new time)"
         elif transfer == TRANSFER_NOT_ANSWERED or any(t.status == "pending" for t in tasks):
             call.next_action = "Clinic staff to call back"
         elif call.status == "transferred":

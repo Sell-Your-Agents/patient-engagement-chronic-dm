@@ -77,6 +77,7 @@ export interface CallPage {
 
 export const INTENT_LABELS: Record<string, string> = {
   appointment_booking: 'Appointment booking',
+  appointment_change: 'Move / cancel appointment',
   doctor_enquiry: 'Doctor / specialty enquiry',
   clinic_info: 'Clinic timings / services',
   missed_call_callback: 'Missed-call callback',

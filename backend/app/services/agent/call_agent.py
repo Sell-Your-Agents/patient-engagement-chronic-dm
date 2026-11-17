@@ -4,8 +4,11 @@ The context (see call_context.py) decides what the agent knows and which control
 use. The session strips every [[TOKEN]] from the audio and acts on the allowed ones:
 
   [[SET_LANGUAGE:en|hi|te]]                                    switch speech recognition and voice
-  [[APPOINTMENT_REQUEST name=..; phone=..; doctor_id=..; doctor=..; preferred=..; slot=..; reason=..]]
+  [[APPOINTMENT_REQUEST name=..; phone=..; doctor_id=..; doctor=..; preferred=..; visit=..; reason=..]]
                                                                record a pending appointment request
+  [[APPOINTMENT_RESCHEDULE id=..; visit=..; preferred=..]]     move an appointment of the caller's number
+  [[APPOINTMENT_CANCEL id=..; reason=..]]                      ask staff to cancel an appointment of the
+                                                               caller's number
   [[CALLBACK_REQUEST name=..; phone=..; doctor=..; preferred=..; reason=..]]
                                                                add a staff follow-up (callback) task
   [[UNANSWERED_QUESTION question=..; name=..; phone=..]]       follow-up: staff answer the question
@@ -26,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models.appointment import Appointment
+from app.models.appointment import ACTIVE_STATUSES, Appointment
 from app.models.doctor import Doctor
 from app.models.call_log import CallLog
 from app.models.callback_schedule import (
@@ -40,6 +43,7 @@ from app.models.callback_schedule import (
 )
 from app.services.agent.call_cleanup import close_call_now
 from app.services.agent.call_context import (
+    CAP_APPOINTMENT_CHANGE,
     CAP_APPOINTMENT_REQUEST,
     CAP_CALLBACK,
     CAP_ESCALATE,
@@ -54,8 +58,15 @@ from app.services.agent.context_shared import (
     LANGUAGE_DIGITS,
     LISTEN_BEFORE_CHOICE_DIGIT,
     is_recorded,
+    last_ten_digits,
 )
-from app.services.scheduling.appointment_service import record_appointment_request, update_appointment_request
+from app.services.scheduling.appointment_service import (
+    appointment_when,
+    record_appointment_request,
+    request_cancellation,
+    reschedule_appointment,
+    update_appointment_request,
+)
 from app.services.scheduling.callback_service import create_follow_up
 from app.services.voice.audio_utils import decode_twilio_payload
 from app.services.voice.stt_service import DeepgramStream
@@ -230,6 +241,12 @@ class CallAgentSession(CallSession):
             if name == "APPOINTMENT_REQUEST" and CAP_APPOINTMENT_REQUEST in caps:
                 await self._handle_appointment(parse_fields(arg))
                 return ""
+            if name == "APPOINTMENT_RESCHEDULE" and CAP_APPOINTMENT_CHANGE in caps:
+                await self._handle_reschedule(parse_fields(arg))
+                return ""
+            if name == "APPOINTMENT_CANCEL" and CAP_APPOINTMENT_CHANGE in caps:
+                await self._handle_cancel(parse_fields(arg))
+                return ""
             if name == "CALLBACK_REQUEST" and CAP_CALLBACK in caps:
                 await self._handle_callback(parse_fields(arg))
                 return ""
@@ -309,13 +326,19 @@ class CallAgentSession(CallSession):
     def _name(self, fields: Dict[str, str]) -> str:
         return fields.get("name") or (self.patient.name if self.patient else "") or self.call.patient_name or "Unknown"
 
+    def _visit(self, fields: Dict[str, str]) -> Optional[datetime]:
+        """The visit day and rough time (visit=YYYY-MM-DDTHH:MM; "slot" accepted from older prompts)."""
+        value = fields.get("visit") or fields.get("slot")
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.strip())
+        except ValueError:
+            logger.warning(f"[{self.call_sid}] Unreadable visit time: {value}")
+            return None
+
     async def _handle_appointment(self, fields: Dict[str, str]) -> None:
-        slot = None
-        if fields.get("slot"):
-            try:
-                slot = datetime.fromisoformat(fields["slot"])
-            except ValueError:
-                logger.warning(f"[{self.call_sid}] Unreadable slot in appointment request: {fields['slot']}")
+        slot = self._visit(fields)
         doctor_id = int(fields["doctor_id"]) if fields.get("doctor_id", "").isdigit() else None
         details = dict(
             patient_name=self._name(fields),
@@ -339,12 +362,15 @@ class CallAgentSession(CallSession):
         logger.info(f"[{self.call_sid}] Appointment request #{appointment.id} recorded ({appointment.status})")
         note = f"[[APPOINTMENT_RECORDED #{appointment.id}: {status}]]"
         if outcome.slot_problem:
-            note = f"[[APPOINTMENT_RECORDED #{appointment.id}: {status}; the requested slot was not used ({outcome.slot_problem}), the clinic team will arrange the time]]"
+            note = (
+                f"[[APPOINTMENT_RECORDED #{appointment.id}: {status}; the day and time were not saved because "
+                f"{outcome.slot_problem}. Tell the caller and agree a day and time within the doctor's hours]]"
+            )
         self._pending_notes.append(note)
-        when = appointment.start_at.strftime("%A %d %b %Y at %H:%M") if appointment.start_at else (appointment.preferred_time or "time not given")
         self._remember(
             "APPOINTMENT_REQUEST:",
-            f"#{appointment.id} for {appointment.patient_name} with {await self._doctor_name(appointment)}, {when} ({status})",
+            f"#{appointment.id} for {appointment.patient_name} with {await self._doctor_name(appointment)}, "
+            f"{appointment_when(appointment)} ({status})",
         )
 
     async def _doctor_name(self, appointment: Appointment) -> str:
@@ -353,6 +379,61 @@ class CallAgentSession(CallSession):
             if doctor:
                 return doctor.name
         return appointment.doctor_requested or "a doctor to be chosen"
+
+    async def _callers_appointment(self, fields: Dict[str, str]) -> Optional[Appointment]:
+        """The appointment named by id=, only if it is upcoming and booked with the number the caller is phoning from.
+
+        Privacy: an appointment booked with any other number is never found, moved or cancelled.
+        """
+        raw = re.sub(r"\D", "", fields.get("id", ""))
+        caller = last_ten_digits(self.call.phone_number)
+        if not raw or len(caller) < 10:
+            return None
+        appointment = (await self.db.execute(
+            select(Appointment).where(Appointment.id == int(raw), Appointment.status.in_(ACTIVE_STATUSES))
+        )).scalar_one_or_none()
+        if appointment is None or last_ten_digits(appointment.phone_number) != caller:
+            logger.warning(f"[{self.call_sid}] Appointment #{raw} is not an upcoming appointment of the caller's number")
+            return None
+        return appointment
+
+    async def _handle_reschedule(self, fields: Dict[str, str]) -> None:
+        appointment = await self._callers_appointment(fields)
+        if appointment is None:
+            self._pending_notes.append(
+                "[[APPOINTMENT_NOT_FOUND: no such upcoming appointment for this number; nothing was changed. "
+                "Tell the caller you could not change it]]"
+            )
+            return
+        problem = await reschedule_appointment(
+            self.db, appointment, when=self._visit(fields), preferred_time=fields.get("preferred"), call_log_id=self.call_id
+        )
+        if problem:
+            # Nothing was changed (the new time is checked before anything is saved)
+            self._pending_notes.append(
+                f"[[RESCHEDULE_NOT_SAVED #{appointment.id}: {problem}. The appointment was not moved; "
+                f"tell the caller and agree a day and time within the doctor's hours]]"
+            )
+            logger.info(f"[{self.call_sid}] Appointment #{appointment.id} not moved: {problem}")
+            return
+        await self.db.commit()
+        logger.info(f"[{self.call_sid}] Appointment #{appointment.id} moved to {appointment_when(appointment)}")
+        self._pending_notes.append(f"[[APPOINTMENT_MOVED #{appointment.id}: now {appointment_when(appointment)}]]")
+        self._remember(f"APPOINTMENT_RESCHEDULE #{appointment.id}:", f"moved to {appointment_when(appointment)}")
+
+    async def _handle_cancel(self, fields: Dict[str, str]) -> None:
+        appointment = await self._callers_appointment(fields)
+        if appointment is None:
+            self._pending_notes.append(
+                "[[APPOINTMENT_NOT_FOUND: no such upcoming appointment for this number; nothing was changed. "
+                "Tell the caller you could not find it]]"
+            )
+            return
+        await request_cancellation(self.db, appointment, reason=fields.get("reason"), call_log_id=self.call_id)
+        await self.db.commit()
+        logger.info(f"[{self.call_sid}] Cancellation requested for appointment #{appointment.id}")
+        self._pending_notes.append(f"[[CANCEL_REQUESTED #{appointment.id}: the clinic team will confirm the cancellation]]")
+        self._remember(f"APPOINTMENT_CANCEL #{appointment.id}:", "cancellation request sent to the clinic team")
 
     async def _handle_callback(self, fields: Dict[str, str]) -> None:
         if self.callback is None:

@@ -1,10 +1,10 @@
-"""Clinic-specific configuration: clinic details, doctor profiles and schedules, and the knowledge base."""
+"""Clinic-specific configuration: clinic details, doctor profiles and working hours, and the knowledge base."""
 import logging
 import re
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +16,7 @@ from app.models.doctor import Doctor
 from app.models.knowledge import KNOWLEDGE_CATEGORIES, ClinicKnowledge
 from app.models.user import User
 from app.services.agent.context_shared import LANGUAGE_NAMES, offered_languages
-from app.services.scheduling.clinic_scheduling import clinic_now, get_free_slots
+from app.services.scheduling.clinic_scheduling import clinic_now
 from app.services.voice.telephony import twilio_configured
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,6 @@ class DoctorResponse(BaseModel):
     working_days: List[int]
     start_time: str
     end_time: str
-    slot_minutes: int
     consultation_fee: Optional[str]
     languages: Optional[str]
     is_active: bool
@@ -90,7 +89,6 @@ class DoctorIn(BaseModel):
     working_days: List[int] = Field(default_factory=list)
     start_time: str
     end_time: str
-    slot_minutes: int = Field(15, ge=5, le=120)
     consultation_fee: Optional[str] = Field(None, max_length=60)
     languages: Optional[str] = Field(None, max_length=120)
     is_active: bool = True
@@ -144,20 +142,6 @@ async def update_doctor(
     await db.commit()
     await db.refresh(doctor)
     return doctor
-
-
-@router.get("/doctors/{doctor_id}/availability")
-async def doctor_availability(
-    doctor_id: int,
-    days: int = Query(7, ge=1, le=30),
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-) -> List[str]:
-    doctor = await db.get(Doctor, doctor_id)
-    if not doctor:
-        raise HTTPException(status_code=404, detail="Doctor not found")
-    free = await get_free_slots(db, [doctor], days)
-    return [slot.isoformat() for slot in free[doctor.id]]
 
 
 # ---------- Knowledge base ----------

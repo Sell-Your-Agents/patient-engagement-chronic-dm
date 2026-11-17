@@ -1,6 +1,6 @@
 import type { Appointment } from '../hooks/useAppointments'
 import { INTENT_LABELS, LANGUAGE_LABELS } from '../hooks/useCalls'
-import { formatDateTime, formatTime } from './ui'
+import { formatDateTime } from './ui'
 
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -45,6 +45,7 @@ export function UrgencyBadge({ urgency }: { urgency: string | null }) {
 
 const INTENT_TONE: Record<string, string> = {
   appointment_booking: 'violet',
+  appointment_change: 'violet',
   doctor_enquiry: 'info',
   clinic_info: 'info',
   missed_call_callback: 'warn',
@@ -80,6 +81,7 @@ export function AppointmentStatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; cls: string }> = {
     pending: { label: 'Pending confirmation', cls: 'warn' },
     confirmed: { label: 'Confirmed', cls: 'ok' },
+    cancel_requested: { label: 'Wants to cancel', cls: 'bad' },
     completed: { label: 'Completed', cls: 'info' },
     cancelled: { label: 'Cancelled', cls: 'mute' },
   }
@@ -89,6 +91,10 @@ export function AppointmentStatusBadge({ status }: { status: string }) {
 
 const NOTE_LABELS: [RegExp, string, string][] = [
   [/^APPOINTMENT_RECORDED/, 'Appointment request recorded', 'violet'],
+  [/^APPOINTMENT_MOVED/, 'Appointment moved', 'violet'],
+  [/^CANCEL_REQUESTED/, 'Cancellation request sent to staff', 'warn'],
+  [/^RESCHEDULE_NOT_SAVED/, 'Appointment not moved', 'bad'],
+  [/^APPOINTMENT_NOT_FOUND/, 'No appointment found for this number', 'mute'],
   [/^CALLBACK_RECORDED/, 'Callback recorded', 'warn'],
   [/^QUESTION_RECORDED/, 'Question passed to the clinic team', 'info'],
   [/^TRANSFERRING/, 'Transferring to the front desk', 'violet'],
@@ -140,8 +146,13 @@ function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 }
 
-/** Opens a printable appointment slip in a new window. */
-export function printAppointmentSlip(a: Appointment, clinicName: string) {
+/** "10 AM – 2 PM" from a doctor's working hours. */
+export function hoursLabel(start: string, end: string) {
+  return `${hhmmTo12h(start).replace(':00', '')} – ${hhmmTo12h(end).replace(':00', '')}`
+}
+
+/** Opens a printable appointment slip in a new window. doctorHours: e.g. "10 AM – 2 PM". */
+export function printAppointmentSlip(a: Appointment, clinicName: string, doctorHours?: string) {
   const win = window.open('', '_blank', 'width=720,height=820')
   if (!win) return
   const row = (label: string, value: string) =>
@@ -161,13 +172,14 @@ export function printAppointmentSlip(a: Appointment, clinicName: string) {
 <table>
 ${row('Patient Name', a.patient_name)}
 ${row('Phone', a.phone_number || '—')}
-${row('Date & Time', `${formatDateTime(a.start_at)} – ${formatTime(a.end_at)}`)}
+${row('Visit', a.start_at ? `${formatDateTime(a.start_at)} (approximate time)` : a.preferred_time || '—')}
+${row('Doctor available', doctorHours || '—')}
 ${row('Doctor', `${a.doctor_name}${a.doctor_specialty ? ` (${a.doctor_specialty})` : ''}`)}
 ${row('Reason for Visit', a.reason || '—')}
 ${row('Clinic', clinicName)}
 ${row('Requested via', a.source === 'agent' ? 'AI calling agent' : 'Clinic staff')}
 </table>
-<div class="foot">Please arrive 10 minutes before your appointment time and bring any previous prescriptions or reports.</div>
+<div class="foot">Please come within the doctor's working hours on the day of your visit, and bring any previous prescriptions or reports.</div>
 <script>window.onload=function(){window.print()}</script>
 </body></html>`)
   win.document.close()

@@ -1,17 +1,17 @@
 """Follow-ups for clinic staff (the one call-back list). The agent never places calls itself."""
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.callback_schedule import (
+    APPOINTMENT_KINDS,
     DEFAULT_PRIORITY,
     FOLLOWUP_DONE,
     FOLLOWUP_PENDING,
     KIND_CALLBACK,
-    KIND_CONFIRM_APPOINTMENT,
     PRIORITY_NORMAL,
     FollowUp,
 )
@@ -66,12 +66,14 @@ async def pending_callback_for_call(db: AsyncSession, call_log_id: int) -> Optio
     return result.scalar_one_or_none()
 
 
-async def close_appointment_follow_ups(db: AsyncSession, appointment_id: int, user_id: Optional[int]) -> None:
-    """Staff confirmed or cancelled an appointment: its "confirm appointment" task is done."""
+async def close_appointment_follow_ups(
+    db: AsyncSession, appointment_id: int, user_id: Optional[int], kinds: Sequence[str] = APPOINTMENT_KINDS
+) -> None:
+    """Staff settled an appointment (confirmed, cancelled, kept it): its open tasks of these kinds are done."""
     result = await db.execute(
         select(FollowUp).where(
             FollowUp.appointment_id == appointment_id,
-            FollowUp.kind == KIND_CONFIRM_APPOINTMENT,
+            FollowUp.kind.in_(kinds),
             FollowUp.status == FOLLOWUP_PENDING,
         )
     )

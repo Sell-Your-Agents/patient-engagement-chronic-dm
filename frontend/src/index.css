@@ -88,6 +88,16 @@ h1, h2, h3 { text-wrap: balance; line-height: 1.15; }
   width: 36px; height: 36px; border-radius: 10px; background: var(--accent); display: grid; place-items: center; flex-shrink: 0;
   box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--accent) 60%, transparent);
 }
+/* Logo image in the sidebar (Six Sigma shield) */
+.mark-img { width: 38px; height: 38px; display: grid; place-items: center; flex-shrink: 0; transition: opacity 0.15s; }
+/* Collapsed sidebar: on hover the "expand" button replaces the logo completely (no logo corner peeking out) */
+.app.mini .brand-btn { width: 38px; height: 38px; }
+.app.mini .brand-btn:hover .mark-img, .app.mini .brand-btn:focus-visible .mark-img { opacity: 0; }
+.app.mini .brand-btn:focus-visible .expand { opacity: 1; }
+/* Theme-matched logo files (components/Brand.tsx): dark-text version on light, white-text on dark */
+.brand-dark { display: none !important; }
+:root[data-theme='dark'] .brand-light { display: none !important; }
+:root[data-theme='dark'] .brand-dark { display: block !important; }
 .brand-txt { min-width: 0; line-height: 1.1; }
 .brand-txt b { font-size: 17px; font-weight: 900; letter-spacing: -0.01em; display: block; }
 .brand-txt span { font-size: 10.5px; color: var(--side-dim); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; margin-top: 3px; }

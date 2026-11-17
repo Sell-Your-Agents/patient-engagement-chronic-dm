@@ -16,14 +16,16 @@ export interface Appointment {
   reason: string | null
   /** The caller's preferred time in words */
   preferred_time: string | null
-  /** Clinic-local time, null until a slot is set */
+  /** Visit day and rough arrival time (clinic-local), null until a day is set */
   start_at: string | null
   end_at: string | null
-  /** pending | confirmed | cancelled | completed */
+  /** pending | confirmed | cancel_requested (patient asked to cancel) | cancelled | completed */
   status: string
   /** agent | staff */
   source: string
   staff_notes: string | null
+  /** Last change the patient made by phone, e.g. "Moved by patient: was Fri 21 Nov, around 2 PM" */
+  change_note: string | null
   confirmed_at: string | null
   created_at: string
 }
@@ -48,7 +50,6 @@ export function useAppointments(params: AppointmentParams = {}) {
 function invalidateAll(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['appointments'] })
   qc.invalidateQueries({ queryKey: ['follow-ups'] })
-  qc.invalidateQueries({ queryKey: ['clinic', 'availability'] })
   qc.invalidateQueries({ queryKey: ['notifications'] })
   qc.invalidateQueries({ queryKey: ['dashboard'] })
 }

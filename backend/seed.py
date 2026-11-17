@@ -4,9 +4,9 @@ Initial database setup for a new, empty database (safe to run again: it skips wh
 Creates:
   1. All tables
   2. Demo clinic staff user  - test@hospital.com / TestPass123! (role: clinic_staff)
-  3. Demo doctor schedules and clinic knowledge base (app/knowledge/clinic_seed.py) -
-     replace them with Six Sigma Clinic's approved information on the Doctors and
-     Clinic Knowledge pages before going live.
+  3. The clinic's doctors and knowledge base (app/knowledge/clinic_seed.py), only into empty
+     tables. The doctors' working hours are placeholders: set the real ones on the Doctors page.
+     To replace old demo data in an existing database, run reset_clinic_data.py instead.
 
 Usage (from backend/):  .\\venv\\Scripts\\python.exe seed.py
 """
@@ -45,7 +45,7 @@ async def seed_database():
             print("[ok] Demo user already exists")
 
         await seed_clinic_data(db)
-        print("[ok] Doctor schedules and clinic knowledge base ready")
+        print("[ok] Doctors and clinic knowledge base ready")
 
 
 if __name__ == "__main__":

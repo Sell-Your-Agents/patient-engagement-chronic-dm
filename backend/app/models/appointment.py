@@ -5,6 +5,13 @@ The agent never confirms an appointment by itself. A request it records starts "
 appointment system is connected (services/scheduling/appointment_service.py) and it reports a
 successful booking, the request is stored "confirmed" straight away.
 
+There are no fixed slots: doctors have working days and hours, and patients come any time within
+them. start_at is the visit day and the patient's rough arrival time (clinic time); end_at is unused.
+
+A patient who calls again from the number they booked with can:
+  - move the visit to another day/time (done straight away, noted in change_note, staff told), or
+  - ask to cancel it: the status becomes "cancel_requested" until staff confirm the cancellation.
+
 Clinic datetimes (start_at / end_at) are naive and in local clinic time; created_at is UTC.
 """
 from datetime import datetime
@@ -20,11 +27,12 @@ SOURCE_STAFF = "staff"
 
 STATUS_PENDING = "pending"  # Pending confirmation
 STATUS_CONFIRMED = "confirmed"
+STATUS_CANCEL_REQUESTED = "cancel_requested"  # the patient asked to cancel; staff confirm
 STATUS_CANCELLED = "cancelled"
 STATUS_COMPLETED = "completed"
-STATUSES = (STATUS_PENDING, STATUS_CONFIRMED, STATUS_CANCELLED, STATUS_COMPLETED)
-# These statuses hold a doctor's slot (a request without a start_at holds nothing)
-ACTIVE_STATUSES = (STATUS_PENDING, STATUS_CONFIRMED)
+STATUSES = (STATUS_PENDING, STATUS_CONFIRMED, STATUS_CANCEL_REQUESTED, STATUS_CANCELLED, STATUS_COMPLETED)
+# Still upcoming (the patient may call to move or cancel these)
+ACTIVE_STATUSES = (STATUS_PENDING, STATUS_CONFIRMED, STATUS_CANCEL_REQUESTED)
 
 
 class Appointment(Base):
@@ -42,7 +50,7 @@ class Appointment(Base):
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # The caller's preferred time in words ("Tomorrow around 5 PM", "Tomorrow evening")
     preferred_time: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
-    # A concrete slot, when one was requested or set by staff
+    # Visit day and rough arrival time (within the doctor's working hours), when known
     start_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
     end_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default=STATUS_PENDING, index=True)
@@ -50,6 +58,9 @@ class Appointment(Base):
     # Reference returned by a connected clinic appointment system, if any
     external_ref: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     staff_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Last change to the visit, for staff, e.g. "Moved by patient: was Fri 21 Nov, around 2 PM",
+    # "Patient asked to cancel", "Rescheduled by staff: was ..."
+    change_note: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
     confirmed_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

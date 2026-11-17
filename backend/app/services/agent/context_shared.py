@@ -19,6 +19,7 @@ settings = get_settings()
 
 # Control-token capabilities
 CAP_APPOINTMENT_REQUEST = "appointment_request"  # [[APPOINTMENT_REQUEST ...]]
+CAP_APPOINTMENT_CHANGE = "appointment_change"  # [[APPOINTMENT_RESCHEDULE ...]] / [[APPOINTMENT_CANCEL ...]]
 CAP_CALLBACK = "callback"  # [[CALLBACK_REQUEST ...]]
 CAP_HUMAN = "human_assistance"  # [[HUMAN_ASSISTANCE ...]]
 CAP_ESCALATE = "escalate"  # [[ESCALATE:emergency|distress]]
@@ -101,27 +102,28 @@ def recording_line(call: CallLog) -> str:
 
 # ---------- Shared prompt sections ----------
 
-def _listed(value: str) -> str:
-    return value.strip() if value and value.strip() else "not listed"
-
-
 def shared_rules() -> str:
-    """Core rules + clinic facts, appended to every call prompt."""
+    """Core rules + clinic facts, appended to every call prompt.
+
+    Clinic facts left empty in .env are simply not listed (the knowledge base may hold them), so the
+    agent never sees "Address: not listed" next to an address in the knowledge base.
+    """
     core = CORE_RULES.format(
         agent_name=settings.clinic_agent_name,
         org_name=settings.clinic_name,
         emergency_number=settings.emergency_number,
         mental_health_helpline=settings.mental_health_helpline,
     )
-    clinic = CLINIC_INFO.format(
-        org_name=settings.clinic_name,
-        clinic_address=_listed(settings.clinic_address),
-        clinic_phone=_listed(settings.clinic_phone),
-        clinic_hours=_listed(settings.clinic_hours),
-        fees_text=_listed(settings.clinic_fees),
-        emergency_number=settings.emergency_number,
-    )
-    return core + clinic
+    facts = [
+        ("Name", settings.clinic_name),
+        ("Address", settings.clinic_address),
+        ("Phone", settings.clinic_phone),
+        ("Opening hours", settings.clinic_hours),
+        ("Consultation fees", settings.clinic_fees),
+        ("Emergency number in India", settings.emergency_number),
+    ]
+    lines = "\n".join(f"- {label}: {value.strip()}" for label, value in facts if value and value.strip())
+    return core + CLINIC_INFO.format(lines=lines)
 
 
 # ---------- Lookups ----------

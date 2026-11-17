@@ -35,6 +35,9 @@ AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_co
 # Nullable columns added after a table was first created: create_all never alters an existing
 # table, so these are added here when missing (keeps an existing test database working).
 _NEW_COLUMNS = {
+    "appointments": {
+        "change_note": "VARCHAR(300)",
+    },
     "follow_ups": {
         "priority": "VARCHAR(10) DEFAULT 'normal'",
         "transfer_status": "VARCHAR(20)",

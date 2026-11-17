@@ -1,9 +1,13 @@
 """Appointment requests and bookings. Staff confirm, reschedule, cancel or complete them here.
 
 Requests the agent records start "pending" (Pending confirmation). Staff call the patient,
-agree the time, then confirm. Confirming or cancelling also closes the request's follow-up task.
+agree the day and rough time (within the doctor's working hours), then confirm. Confirming or
+cancelling also closes the appointment's follow-up tasks.
+
+A patient's cancellation request ("cancel_requested") is settled here too: staff either confirm the
+cancellation (status cancelled) or keep the appointment (back to pending / confirmed).
 """
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -17,6 +21,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models.appointment import (
     SOURCE_STAFF,
+    STATUS_CANCEL_REQUESTED,
     STATUS_CANCELLED,
     STATUS_CONFIRMED,
     STATUS_PENDING,
@@ -24,12 +29,14 @@ from app.models.appointment import (
     Appointment,
 )
 from app.models.call_log import call_ref
+from app.models.callback_schedule import FOLLOWUP_PENDING, KIND_CANCEL_REQUEST, FollowUp
 from app.models.doctor import Doctor
 from app.models.user import User
 from app.routers.clinic import normalize_phone
 from app.services.agent.context_shared import lookup_caller
+from app.services.scheduling.appointment_service import appointment_when
 from app.services.scheduling.callback_service import close_appointment_follow_ups
-from app.services.scheduling.clinic_scheduling import BookingError, check_slot
+from app.services.scheduling.clinic_scheduling import BookingError, check_visit, visit_text
 
 settings = get_settings()
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
@@ -55,6 +62,8 @@ class AppointmentResponse(BaseModel):
     status: str
     source: str
     staff_notes: Optional[str]
+    # Last change the patient made by phone ("Moved by patient: was ...", "Patient asked to cancel")
+    change_note: Optional[str]
     confirmed_at: Optional[datetime]
     created_at: datetime
 
@@ -78,6 +87,7 @@ def _out(a: Appointment) -> AppointmentResponse:
         status=a.status,
         source=a.source,
         staff_notes=a.staff_notes,
+        change_note=a.change_note,
         confirmed_at=a.confirmed_at,
         created_at=a.created_at,
     )
@@ -138,12 +148,12 @@ class StaffAppointmentCreate(BaseModel):
 async def create_appointment(
     data: StaffAppointmentCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
-    """Staff book an appointment into a doctor's free slot (e.g. for a walk-in or a phone call they took)."""
+    """Staff book a visit within a doctor's working hours (e.g. for a walk-in or a phone call they took)."""
     doctor = await db.get(Doctor, data.doctor_id)
     if not doctor or not doctor.is_active:
         raise HTTPException(status_code=400, detail="Doctor not found")
     try:
-        start_at = await check_slot(db, doctor, data.start_at.replace(tzinfo=None))
+        start_at = check_visit(doctor, data.start_at.replace(tzinfo=None))
     except BookingError as err:
         raise HTTPException(status_code=400, detail=str(err))
     phone = normalize_phone(data.phone_number)
@@ -156,8 +166,7 @@ async def create_appointment(
         phone_number=phone,
         reason=data.reason,
         start_at=start_at,
-        end_at=start_at + timedelta(minutes=doctor.slot_minutes),
-        preferred_time=start_at.strftime("%a %d %b, %I:%M %p"),
+        preferred_time=visit_text(start_at),
         status=STATUS_CONFIRMED if data.confirmed else STATUS_PENDING,
         source=SOURCE_STAFF,
         confirmed_by_user_id=user.id if data.confirmed else None,
@@ -188,7 +197,11 @@ async def update_appointment(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Confirm (optionally setting doctor and time), reschedule, cancel or complete an appointment."""
+    """Confirm (optionally setting doctor and visit time), reschedule, cancel or complete an appointment.
+
+    For a patient's cancellation request: status "cancelled" confirms it; "pending"/"confirmed"
+    keeps the appointment.
+    """
     appointment = await _load(db, appointment_id)
 
     if data.doctor_id is not None or data.start_at is not None:
@@ -196,28 +209,52 @@ async def update_appointment(
         doctor = await db.get(Doctor, doctor_id) if doctor_id else None
         if not doctor:
             raise HTTPException(status_code=400, detail="Choose a doctor")
-        appointment.doctor_id = doctor.id
+        moved = data.doctor_id not in (None, appointment.doctor_id) or (
+            data.start_at is not None and data.start_at.replace(tzinfo=None) != appointment.start_at
+        )
         start = data.start_at or appointment.start_at
-        if start:
+        before = f"{appointment.doctor_display_name}, {appointment_when(appointment)}"
+        had_visit = appointment.start_at is not None
+        if start and moved:
             try:
-                start = await check_slot(db, doctor, start.replace(tzinfo=None), ignore_appointment_id=appointment.id)
+                start = check_visit(doctor, start.replace(tzinfo=None))
             except BookingError as err:
                 raise HTTPException(status_code=400, detail=str(err))
             appointment.start_at = start
-            appointment.end_at = start + timedelta(minutes=doctor.slot_minutes)
+            appointment.end_at = None
+        appointment.doctor_id = doctor.id
+        appointment.doctor = doctor
+        if moved and appointment.start_at:
+            if had_visit:
+                appointment.change_note = f"Rescheduled by staff: was {before}"[:300]
+            # Open tasks for this appointment show the new doctor and time
+            tasks = await db.execute(
+                select(FollowUp).where(FollowUp.appointment_id == appointment.id, FollowUp.status == FOLLOWUP_PENDING)
+            )
+            for task in tasks.scalars().all():
+                task.doctor_requested = doctor.name
+                task.preferred_time = visit_text(appointment.start_at)
 
     if data.staff_notes is not None:
         appointment.staff_notes = data.staff_notes
 
     if data.status and data.status != appointment.status:
+        previous = appointment.status
         if data.status == STATUS_CONFIRMED:
             if not appointment.start_at or not appointment.doctor_id:
-                raise HTTPException(status_code=400, detail="Set the doctor and time before confirming")
+                raise HTTPException(status_code=400, detail="Set the doctor and the visit day and time before confirming")
             appointment.confirmed_by_user_id = user.id
             appointment.confirmed_at = datetime.utcnow()
         appointment.status = data.status
         if data.status in (STATUS_CONFIRMED, STATUS_CANCELLED):
             await close_appointment_follow_ups(db, appointment.id, user.id)
+        elif previous == STATUS_CANCEL_REQUESTED:
+            # Staff kept the appointment: the cancellation request is settled
+            await close_appointment_follow_ups(db, appointment.id, user.id, kinds=(KIND_CANCEL_REQUEST,))
+        if previous == STATUS_CANCEL_REQUESTED and data.status != STATUS_CANCELLED:
+            # The cancel request is settled; a "Rescheduled by staff" note set above stays
+            if (appointment.change_note or "").startswith("Patient asked to cancel"):
+                appointment.change_note = None
 
     await db.commit()
     db.expire(appointment)

@@ -190,8 +190,16 @@ export function FollowUpsPage() {
                               Confirm visit
                             </Link>
                           )}
+                          {t.status === 'pending' && t.kind === 'cancel_request' && (
+                            <Link to="/appointments" className="btn sm d">
+                              Confirm cancel
+                            </Link>
+                          )}
                           {t.status === 'pending' && (
-                            <button className={`btn sm ${t.kind === 'confirm_appointment' ? '' : 'p'}`} onClick={() => setClosing(t)}>
+                            <button
+                              className={`btn sm ${t.kind === 'confirm_appointment' || t.kind === 'cancel_request' ? '' : 'p'}`}
+                              onClick={() => setClosing(t)}
+                            >
                               Mark done
                             </button>
                           )}
@@ -246,6 +254,12 @@ function CloseModal({ task, onClose }: { task: FollowUp; onClose: () => void }) 
       )}
       {task.kind === 'confirm_appointment' && (
         <p className="warnbox mb-3 text-[13px]">This only closes the task. To confirm the visit, use Confirm on the Appointments page (that closes this task too).</p>
+      )}
+      {task.kind === 'cancel_request' && (
+        <p className="warnbox mb-3 text-[13px]">
+          This only closes the task: the appointment is not cancelled. To cancel it, use Confirm cancel on the Appointments page (that closes this task
+          too).
+        </p>
       )}
       <label className="block">
         <span className="lbl mb-1.5 block">What happened? (optional)</span>

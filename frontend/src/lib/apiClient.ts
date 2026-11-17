@@ -350,11 +350,6 @@ class ApiClient {
     return response.data
   }
 
-  async getDoctorAvailability(doctorId: number, days = 7) {
-    const response = await this.client.get(`/clinic/doctors/${doctorId}/availability`, { params: { days } })
-    return response.data
-  }
-
   async listKnowledge() {
     const response = await this.client.get('/clinic/knowledge')
     return response.data

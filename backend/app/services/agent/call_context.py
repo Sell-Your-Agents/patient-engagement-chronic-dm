@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.call_log import CallLog
 from app.models.patient import Patient
 from app.services.agent.context_shared import (  # noqa: F401  (re-exported for call_agent / routers)
+    CAP_APPOINTMENT_CHANGE,
     CAP_APPOINTMENT_REQUEST,
     CAP_CALLBACK,
     CAP_ESCALATE,
