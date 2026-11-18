@@ -755,3 +755,14 @@ export function Pagination({
     </div>
   )
 }
+
+/** "cough and fever" -> "Cough and fever" (first letter capital, rest untouched). */
+export function sentenceCase(text: string | null | undefined) {
+  const t = (text || '').trim()
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : ''
+}
+
+/** "Thursday around 10 AM" -> "Thursday 10 AM" (drops the vague "around"). */
+export function plainTime(text: string | null | undefined) {
+  return (text || '').replace(/\s*,?\s*\baround\b\s*/gi, (m) => (m.includes(',') ? ', ' : ' ')).trim()
+}

@@ -41,7 +41,7 @@ export function DashboardPage() {
           to="/follow-ups"
         />
         <Kpi label="Pending confirmation" value={data.pending_appointments} hint={pendingNote} icon="calendar" tone="violet" to="/appointments" />
-        <Kpi label="Confirmed upcoming" value={data.confirmed_upcoming} hint="Visits confirmed by staff" icon="checkCircle" tone="ok" to="/appointments" />
+        <Kpi label="Confirmed by Staff" value={data.confirmed_upcoming} hint="Upcoming visits" icon="checkCircle" tone="ok" to="/appointments" />
       </div>
 
       {/* Two cards side by side: calls over time | why and in which language */}
@@ -148,7 +148,7 @@ function AgentCard() {
     { title: 'Answers doctor and timing questions', text: 'Only from the Doctors and Clinic Knowledge pages, never made up', on: true },
     { title: 'Takes callback requests', text: 'Missed calls and "please call me back" go to Follow-ups', on: true },
     { title: 'Passes on questions it cannot answer', text: 'Saved as "Question not answered" for staff to call back', on: true },
-    { title: 'Connects callers to the front desk', text: info?.human_transfer ? 'Hold music, then rings the front desk' : 'Off: set a front-desk number to turn it on; until then it takes a message', on: !!info?.human_transfer },
+    // { title: 'Connects callers to the front desk', text: info?.human_transfer ? 'Hold music, then rings the front desk' : 'Off: set a front-desk number to turn it on; until then it takes a message', on: !!info?.human_transfer },
     { title: 'Handles emergencies', text: 'Tells the caller to call 108 and adds an urgent follow-up', on: true },
     { title: 'Remembers earlier calls', text: 'Knows what the same number asked last time', on: true },
   ]

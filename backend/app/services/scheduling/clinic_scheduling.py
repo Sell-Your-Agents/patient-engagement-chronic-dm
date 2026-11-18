@@ -94,7 +94,7 @@ def schedule_text(doctor: Doctor) -> str:
 
 def visit_text(when: datetime) -> str:
     """'Fri 21 Nov, around 2 PM' (how a visit is shown to staff and the agent)."""
-    return f"{when.strftime('%a %d %b')}, around {time_words(when.strftime('%H:%M'))}"
+    return f"{when.strftime('%a %d %b')}, {time_words(when.strftime('%H:%M'))}"
 
 
 def visit_problem(doctor: Doctor, when: datetime) -> Optional[str]:

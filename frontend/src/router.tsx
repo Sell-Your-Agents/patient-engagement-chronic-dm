@@ -68,6 +68,10 @@ const appointmentListRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/appointments',
   component: AppointmentsPage,
+  validateSearch: (s: Record<string, unknown>): { doctor?: number } => {
+    const n = Number(s.doctor)
+    return Number.isFinite(n) && n > 0 ? { doctor: n } : {}
+  },
 })
 
 // Call records

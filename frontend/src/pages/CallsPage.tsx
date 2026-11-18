@@ -101,7 +101,7 @@ export function CallsPage() {
         <select className="field !h-[34px] !w-auto font-bold" value={booking} onChange={(e) => setBooking(e.target.value)} aria-label="Booking">
           <option value="">Any booking</option>
           <option value="pending">Pending confirmation</option>
-          <option value="confirmed">Confirmed</option>
+          <option value="confirmed">Confirmed by Staff</option>
           <option value="not_applicable">No booking</option>
         </select>
         <input className="field !h-[34px] ml-auto !w-64" placeholder="Name, phone or SS-1125" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search calls" />

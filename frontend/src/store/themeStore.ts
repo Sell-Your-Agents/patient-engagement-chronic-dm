@@ -48,7 +48,7 @@ interface ThemeState {
 }
 
 export const useThemeStore = create<ThemeState>((set, get) => ({
-  accent: read<Accent>(ACCENT_KEY, ['green', 'blue'], 'green'),
+  accent: read<Accent>(ACCENT_KEY, ['green', 'blue'], 'blue'),
   mode: read<Mode>(MODE_KEY, ['light', 'dark', 'system'], 'light'),
   setAccent: (accent) => {
     write(ACCENT_KEY, accent)

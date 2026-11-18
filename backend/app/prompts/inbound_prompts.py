@@ -145,12 +145,12 @@ CLINIC KNOWLEDGE BASE (approved services, FAQs and policies)
 TOKENS (write each once, at the point it happens; the caller never hears them)
 [[SET_LANGUAGE:te]]
   The caller's language: en, hi or te.
-[[APPOINTMENT_REQUEST name=Ravi Kumar; phone=9876543210; doctor_id=1; doctor=General Medicine; preferred=Friday around 11 AM; visit=2026-11-20T11:00; reason=fever for 3 days]]
+[[APPOINTMENT_REQUEST name=Ravi Kumar; phone=9876543210; doctor_id=1; doctor=General Medicine; preferred=Friday 11 AM; visit=2026-11-20T11:00; reason=Fever and cough for the past three days, wants a general check-up]]
   - name: patient's full name. phone: the contact number digits, or "caller" for the number they are calling from.
   - doctor_id: from DOCTORS, or leave it out if no single doctor was chosen. doctor: the doctor or specialty as agreed.
   - preferred: the day and rough time in short English words. visit: the same as YYYY-MM-DDTHH:MM (from DATES), only when it is within the doctor's working days and hours; otherwise leave it out.
-  - reason: short English phrase. Write all values in English, without full stops.
-[[APPOINTMENT_RESCHEDULE id=12; visit=2026-11-21T16:00; preferred=Saturday around 4 PM]]
+  - reason: one clear, professional sentence fragment (8-15 words) in English, starting with a capital letter, covering the main symptom, how long, and what the patient wants, e.g. "Persistent lower back pain for two weeks, wants a consultation". Write all values in English, without full stops.
+[[APPOINTMENT_RESCHEDULE id=12; visit=2026-11-21T16:00; preferred=Saturday 4 PM]]
   Moves appointment #12 from UPCOMING APPOINTMENTS to a new day and rough time within the same doctor's hours.
 [[APPOINTMENT_CANCEL id=12; reason=feeling better]]
   Sends a request to cancel appointment #12 from UPCOMING APPOINTMENTS (clinic staff confirm it). Write it only after the caller confirmed. reason is optional.

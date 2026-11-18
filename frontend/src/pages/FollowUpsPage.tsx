@@ -10,7 +10,7 @@ import {
   type FollowUp,
 } from '../hooks/useFollowUps'
 import { useClinicInfo } from '../hooks/useClinic'
-import { PageHeader, Modal, Avatar, EmptyState, ErrorState, TableSkeleton, Pagination, Spinner, StatusBadge, paginate, friendlyTime } from '../components/ui'
+import { PageHeader, Modal, Avatar, EmptyState, ErrorState, TableSkeleton, Pagination, Spinner, StatusBadge, paginate, friendlyTime, sentenceCase, plainTime } from '../components/ui'
 import { toast, errorText } from '../components/toast'
 import { Icon } from '../components/Icon'
 
@@ -32,7 +32,9 @@ export function FollowUpsPage() {
   const { data: info } = useClinicInfo()
   const update = useUpdateFollowUp()
 
-  const all = (data || []).filter((t) => !kind || t.kind === kind)
+  const all = (data || [])
+    .filter((t) => !kind || t.kind === kind)
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
   const pending = all.filter((t) => t.status === 'pending')
   const finished = all.filter((t) => t.status !== 'pending')
   const urgent = pending.filter((t) => t.priority === 'urgent').length
@@ -83,11 +85,11 @@ export function FollowUpsPage() {
             </select>
           </div>
         }
-        actions={
-          <button className="btn" onClick={() => setAdding(true)}>
-            <Icon name="plus" className="h-4 w-4" /> Add follow-up
-          </button>
-        }
+        // actions={
+        //   <button className="btn" onClick={() => setAdding(true)}>
+        //     <Icon name="plus" className="h-4 w-4" /> Add follow-up
+        //   </button>
+        // }
       />
 
       {urgent > 0 && tab !== 'done' && (
@@ -153,7 +155,7 @@ export function FollowUpsPage() {
                               )}
                             </b>
                             {t.phone_number ? (
-                              <a href={`tel:${t.phone_number}`} className="block text-[12.5px] font-bold text-brand">
+                              <a href={`tel:${t.phone_number}`} className="block whitespace-nowrap text-[12.5px] font-bold text-brand">
                                 {t.phone_number}
                               </a>
                             ) : (
@@ -166,9 +168,9 @@ export function FollowUpsPage() {
                         <span className={`pill ${followUpOutcomeTone(t)}`}>{followUpOutcome(t)}</span>
                       </td>
                       <td className="max-w-[320px] text-[13px] text-ink-soft">
-                        {t.reason || '—'}
+                        {sentenceCase(t.reason) || '—'}
                         {(t.doctor_requested || t.preferred_time) && (
-                          <small className="mt-1 block text-ink-muted">{[t.doctor_requested, t.preferred_time].filter(Boolean).join(' · ')}</small>
+                          <small className="mt-1 block text-ink-muted">{plainTime([t.doctor_requested, t.preferred_time].filter(Boolean).join(' · '))}</small>
                         )}
                         {t.staff_notes && <small className="mt-1 block text-ink-muted">Note: {t.staff_notes}</small>}
                       </td>

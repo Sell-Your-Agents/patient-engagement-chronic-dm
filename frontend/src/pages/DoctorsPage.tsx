@@ -135,7 +135,7 @@ function DoctorCard({ doctor, duty, today, booked, onEdit }: { doctor: Doctor; d
         <span className="text-[12.5px] text-ink-muted">{booked} upcoming</span>
       </div>
       <div className="flex gap-2">
-        <Link to="/appointments" className="btn sm p flex-1">
+        <Link to="/appointments" search={{ doctor: doctor.id }} className="btn sm p flex-1">
           Appointments
         </Link>
         <button className="btn sm" onClick={onEdit}>

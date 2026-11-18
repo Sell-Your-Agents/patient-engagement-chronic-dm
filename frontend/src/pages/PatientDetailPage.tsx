@@ -4,7 +4,7 @@ import { usePatient, usePatientFollowUps } from '../hooks/usePatients'
 import { useCallPage, INTENT_LABELS, LANGUAGE_LABELS } from '../hooks/useCalls'
 import { useAppointments } from '../hooks/useAppointments'
 import { followUpOutcome } from '../hooks/useFollowUps'
-import { PageHeader, Panel, Loader, ErrorState, EmptyState, Avatar, friendlyTime, formatDateTime, formatDate, formatLength, utcDate } from '../components/ui'
+import { PageHeader, Panel, Loader, ErrorState, EmptyState, Avatar, friendlyTime, plainTime, formatDateTime, formatDate, formatLength, utcDate } from '../components/ui'
 import { AppointmentStatusBadge } from '../components/clinic'
 import { PatientFormModal } from '../components/PatientForm'
 import { MoreText } from '../components/MoreText'
@@ -70,7 +70,7 @@ export function PatientDetailPage() {
       when: friendlyTime(a.created_at, true),
       icon: 'calendar',
       title: `Appointment · ${a.doctor_id ? a.doctor_name : a.doctor_requested || 'doctor not chosen'}`,
-      detail: [a.start_at ? formatDateTime(a.start_at) : a.preferred_time ? `Asked for ${a.preferred_time}` : 'No time yet', a.reason].filter(Boolean).join(' · '),
+      detail: [a.start_at ? formatDateTime(a.start_at) : a.preferred_time ? `Asked for ${plainTime(a.preferred_time)}` : 'No time yet', a.reason].filter(Boolean).join(' · '),
       right: <AppointmentStatusBadge status={a.status} />,
     })
   }

@@ -3,7 +3,7 @@ Initial database setup for a new, empty database (safe to run again: it skips wh
 
 Creates:
   1. All tables
-  2. Demo clinic staff user  - test@hospital.com / TestPass123! (role: clinic_staff)
+  2. Demo clinic staff user  - admin@hospital.com / Admin123! (role: clinic_staff)
   3. The clinic's doctors and knowledge base (app/knowledge/clinic_seed.py), only into empty
      tables. The doctors' working hours are placeholders: set the real ones on the Doctors page.
      To replace old demo data in an existing database, run reset_clinic_data.py instead.
@@ -20,8 +20,8 @@ from app.database import AsyncSessionLocal, init_db
 from app.knowledge.clinic_seed import seed_clinic_data
 from app.models.user import User
 
-DEMO_EMAIL = "test@hospital.com"
-DEMO_PASSWORD = "TestPass123!"
+DEMO_EMAIL = "admin@hospital.com"
+DEMO_PASSWORD = "Admin123!"
 
 
 async def seed_database():

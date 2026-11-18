@@ -6,8 +6,8 @@ import { PageHeader, Panel, Avatar } from '../components/ui'
 import { toast } from '../components/toast'
 
 const ACCENTS: { key: Accent; name: string; note: string; color: string; tint: string }[] = [
-  { key: 'green', name: 'Green & white', note: 'Default clinic theme', color: '#0f8f87', tint: '#e6f4f3' },
-  { key: 'blue', name: 'Blue & white', note: 'Zensark blue', color: '#2a4fbf', tint: '#eaeffa' },
+  { key: 'green', name: 'Green & white', note: 'Clinic green', color: '#0f8f87', tint: '#e6f4f3' },
+  { key: 'blue', name: 'Blue & white', note: 'Default theme · Zensark blue', color: '#2a4fbf', tint: '#eaeffa' },
 ]
 
 const MODES: { key: Mode; name: string; note: string; icon: IconName }[] = [

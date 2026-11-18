@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from '@tanstack/react-router'
+import { Link, useSearch } from '@tanstack/react-router'
 import { useAppointments, useUpdateAppointment, useCreateAppointment, type Appointment } from '../hooks/useAppointments'
 import { useDoctors, useClinicInfo, type Doctor } from '../hooks/useClinic'
 import {
@@ -14,8 +14,10 @@ import {
   Spinner,
   paginate,
   friendlyTime,
+  sentenceCase,
+  plainTime,
 } from '../components/ui'
-import { AppointmentStatusBadge, WEEKDAYS, hoursLabel, localISODate, mondayIndex, printAppointmentSlip } from '../components/clinic'
+import { AppointmentStatusBadge, WEEKDAYS, hoursLabel, localISODate, mondayIndex } from '../components/clinic'
 import { toast, errorText } from '../components/toast'
 import { Icon } from '../components/Icon'
 import { MoreText } from '../components/MoreText'
@@ -53,12 +55,13 @@ function visitLabel(start: string) {
   const d = new Date(start)
   const day = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
   const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(':00', '')
-  return `${day}, around ${time}`
+  return `${day}, ${time}`
 }
 
 export function AppointmentsPage() {
   const [tab, setTab] = useState<Tab>('pending')
-  const [doctorId, setDoctorId] = useState('')
+  const search = useSearch({ strict: false }) as { doctor?: number }
+  const [doctorId, setDoctorId] = useState(search.doctor ? String(search.doctor) : '')
   const [page, setPage] = useState(1)
   const [confirming, setConfirming] = useState<Appointment | null>(null)
   const [rescheduling, setRescheduling] = useState<Appointment | null>(null)
@@ -100,7 +103,7 @@ export function AppointmentsPage() {
                 [
                   ['pending', 'Pending confirmation', pending.length],
                   ['cancel', 'Cancel requests', cancelRequests.length],
-                  ['confirmed', 'Confirmed upcoming', confirmed.length],
+                  ['confirmed', 'Confirmed by Staff', confirmed.length],
                   ['all', 'All', list.length],
                 ] as const
               ).map(([k, l, n]) => (
@@ -137,7 +140,7 @@ export function AppointmentsPage() {
       <div className="grid g3 mb-3.5">
         <Kpi label="Pending confirmation" value={pending.length} hint="Requests the agent recorded" icon="clock" tone="warn" />
         <Kpi label="Cancel requests" value={cancelRequests.length} hint="Patients asked to cancel; confirm them" icon="alert" tone="bad" />
-        <Kpi label="Confirmed upcoming" value={confirmed.length} hint="Confirmed by clinic staff" icon="checkCircle" tone="ok" />
+        <Kpi label="Confirmed by Staff" value={confirmed.length} hint="Upcoming visits" icon="checkCircle" tone="ok" />
       </div>
 
       <div className="card">
@@ -189,12 +192,6 @@ export function AppointmentsPage() {
                   const doc = a.doctor_id ? doctorById.get(a.doctor_id) : undefined
                   const doctorSub = a.doctor_id ? a.doctor_specialty : 'as asked by caller'
                   const more: RowMenuItem[] = []
-                  if (a.status === 'confirmed') {
-                    more.push({
-                      label: 'Print slip',
-                      onClick: () => printAppointmentSlip(a, info?.clinic_name || 'Clinic', doc ? hoursLabel(doc.start_time, doc.end_time) : undefined),
-                    })
-                  }
                   if (a.status === 'cancel_requested') {
                     more.push({
                       label: 'Keep appointment (patient changed mind)',
@@ -218,7 +215,7 @@ export function AppointmentsPage() {
                                 a.patient_name
                               )}
                             </b>
-                            <small className="block truncate">{a.phone_number || '—'}</small>
+                            <small className="block whitespace-nowrap">{a.phone_number || '—'}</small>
                           </div>
                         </div>
                       </td>
@@ -228,24 +225,24 @@ export function AppointmentsPage() {
                       </td>
                       <td
                         title={[
-                          a.preferred_time && `Asked for: ${a.preferred_time}`,
+                          a.preferred_time && `Asked for: ${plainTime(a.preferred_time)}`,
                           doc && `Doctor available ${availabilityLabel(doc)}`,
-                          a.change_note,
+                          plainTime(a.change_note),
                         ]
                           .filter(Boolean)
                           .join('\n')}
                       >
                         {a.start_at ? <b className="block truncate">{visitLabel(a.start_at)}</b> : <span className="block truncate text-ink-muted">Day not set yet</span>}
                         {a.change_note ? (
-                          <small className={`block truncate font-bold ${a.status === 'cancel_requested' ? 'text-bad' : 'text-warn'}`}>{a.change_note}</small>
+                          <small className={`block truncate font-bold ${a.status === 'cancel_requested' ? 'text-bad' : 'text-warn'}`}>{plainTime(a.change_note)}</small>
                         ) : a.preferred_time && !a.start_at ? (
-                          <small className="block truncate text-ink-muted">Asked for: {a.preferred_time}</small>
+                          <small className="block truncate text-ink-muted">Asked for: {plainTime(a.preferred_time)}</small>
                         ) : doc ? (
                           <small className="block truncate text-ink-muted">Doctor in {hoursLabel(doc.start_time, doc.end_time)}</small>
                         ) : null}
                       </td>
                       <td className="text-[13px] text-ink-soft">
-                        <MoreText text={a.reason} limit={22} />
+                        <MoreText text={sentenceCase(a.reason)} limit={70} />
                       </td>
                       <td className="text-[13px]">
                         <span className="block truncate">{friendlyTime(a.created_at, true)}</span>
@@ -423,12 +420,12 @@ function ConfirmModal({ appointment: a, doctors, mode, onClose }: { appointment:
           </div>
           <div>
             <span className="lbl">Preferred time</span>
-            <b>{a.preferred_time || '—'}</b>
+            <b>{a.start_at ? visitLabel(a.start_at) : plainTime(a.preferred_time) || '—'}</b>
           </div>
           {a.reason && (
             <div className="col-span-2">
               <span className="lbl">Reason</span>
-              <b>{a.reason}</b>
+              <b>{sentenceCase(a.reason)}</b>
             </div>
           )}
         </div>

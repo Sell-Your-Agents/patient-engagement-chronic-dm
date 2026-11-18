@@ -37,7 +37,7 @@ export const FOLLOW_UP_KIND_LABELS: Record<string, string> = {
   callback: 'Callback requested',
   confirm_appointment: 'Appointment request: needs confirming',
   cancel_request: 'Wants to cancel appointment',
-  rescheduled: 'Patient moved appointment',
+  rescheduled: 'Patient rescheduled appointment',
   staff: 'Added by staff',
 }
 

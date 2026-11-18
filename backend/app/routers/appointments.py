@@ -28,7 +28,7 @@ from app.models.appointment import (
     STATUSES,
     Appointment,
 )
-from app.models.call_log import call_ref
+from app.models.call_log import CallLog, call_ref
 from app.models.callback_schedule import FOLLOWUP_PENDING, KIND_CANCEL_REQUEST, FollowUp
 from app.models.doctor import Doctor
 from app.models.user import User
@@ -91,6 +91,23 @@ def _out(a: Appointment) -> AppointmentResponse:
         confirmed_at=a.confirmed_at,
         created_at=a.created_at,
     )
+
+
+async def sync_call_booking_status(db: AsyncSession, call_log_id: Optional[int]) -> None:
+    """Keep the call record's booking status in step with what staff did to its appointments."""
+    if not call_log_id:
+        return
+    call = await db.get(CallLog, call_log_id)
+    if not call or call.booking_status == "not_applicable":
+        return
+    await db.flush()
+    statuses = (await db.execute(select(Appointment.status).where(Appointment.call_log_id == call_log_id))).scalars().all()
+    live = [x for x in statuses if x != STATUS_CANCELLED]
+    if not live:
+        return
+    confirmed = all(x == STATUS_CONFIRMED for x in live)
+    call.booking_status = "confirmed" if confirmed else "pending"
+    call.next_action = "None" if confirmed else "Clinic staff callback to confirm appointment"
 
 
 async def _load(db: AsyncSession, appointment_id: int) -> Appointment:
@@ -256,6 +273,7 @@ async def update_appointment(
             if (appointment.change_note or "").startswith("Patient asked to cancel"):
                 appointment.change_note = None
 
+    await sync_call_booking_status(db, appointment.call_log_id)
     await db.commit()
     db.expire(appointment)
     return _out(await _load(db, appointment_id))
