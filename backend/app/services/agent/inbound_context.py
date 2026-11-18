@@ -26,6 +26,7 @@ from app.prompts.inbound_prompts import (
     GREETING_KNOWN,
     HUMAN_RULE_REQUEST,
     HUMAN_RULE_TRANSFER,
+    NO_PREVIOUS_CALLS_BLOCK,
     OPENING_EN,
     PREVIOUS_CALLS_BLOCK,
     RECEPTIONIST_PROMPT,
@@ -212,7 +213,7 @@ async def _history_block(db: AsyncSession, call: CallLog) -> str:
         open_items.append(f"- Waiting for a clinic callback: {t.reason or t.kind.replace('_', ' ')}")
 
     if not lines and not open_items:
-        return ""
+        return NO_PREVIOUS_CALLS_BLOCK
     return PREVIOUS_CALLS_BLOCK.format(
         calls="\n".join(lines) or "- (no summaries)",
         open_items="\n".join(open_items) or "- Nothing open",

@@ -35,11 +35,26 @@ EARLIER CALLS FROM THIS NUMBER (most recent first; summaries written after each 
 STILL OPEN FOR THIS NUMBER
 {open_items}
 HOW TO USE THIS
-- The same phone can be used by family members. Before you talk about anything above, check it is the same caller or patient, for example: "Are you calling about the question you asked us earlier?"
+- These are the calls made from the number the caller is phoning from right now. You may talk about them with this caller, including family members' names and requests made from this same number.
+- The same phone can be used by family members, so when you bring up an earlier call, first check who is calling, for example: "Am I speaking with <name>?" or "Are you calling about the question you asked us earlier?"
 - If they confirm, continue from there: do not ask again for details already given. If they asked something before that is still open, mention that the clinic team has it.
 - For their appointments use UPCOMING APPOINTMENTS below, not this section.
-- If it is someone else, or they say it is about something new, ignore this section and help them normally.
-- Never read these notes out word for word.
+- If they say it is about something new, help them normally.
+- Never read these notes out word for word; tell them in your own short words.
+
+IF THE CALLER ASKS "DO YOU REMEMBER ME?" OR "DO YOU HAVE MY EARLIER CALLS?"
+- Never say you cannot remember earlier calls: you can see the calls above.
+- First check who is calling: "I can see this number has called us before. Am I speaking with <name>?" (use the name from the calls above; if no name was given, ask: "May I know your name, please?")
+- If YES: greet them by name and give a short summary in your own words, for example: "Yes, <name>, you called on Monday about a fever and asked to see Doctor Pratap on Friday." Then ask how you can help today.
+- If NO (someone else using this phone, such as a family member): say: "No problem. This number has called us before." If they ask about those earlier calls from this number, you may tell them in short words. Then ask how you can help today.
+- If NOT SURE: say kindly: "This number has called us before. Could you tell me your name, or what the earlier call was about, so I can help you better?" Then continue as above.
+"""
+
+# No earlier calls from this number: what to say if the caller asks to be remembered
+NO_PREVIOUS_CALLS_BLOCK = """
+EARLIER CALLS FROM THIS NUMBER
+- None found for the number the caller is phoning from.
+- If the caller asks "Do you remember me?" or about earlier calls, say kindly: "I don't see any earlier calls from this number. Did you call us from a different number? For your privacy, I can only share details of calls from the number you are calling from now." Then ask how you can help today.
 """
 
 # Appointments booked with the number the caller is phoning from: the only ones they may hear about or change

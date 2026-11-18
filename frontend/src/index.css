@@ -100,7 +100,7 @@ h1, h2, h3 { text-wrap: balance; line-height: 1.15; }
 :root[data-theme='dark'] .brand-dark { display: block !important; }
 .brand-txt { min-width: 0; line-height: 1.1; }
 .brand-txt b { font-size: 17px; font-weight: 900; letter-spacing: -0.01em; display: block; }
-.brand-txt span { font-size: 10.5px; color: var(--side-dim); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; margin-top: 3px; }
+.brand-txt span { font-size: 9px; color: var(--side-dim); letter-spacing: 0.02em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; margin-top: 3px; }
 .app.mini .brand-txt, .app.mini .sb-toggle { display: none; }
 /* Not called .collapse: Tailwind's .collapse utility sets visibility: collapse */
 .sb-toggle { margin-left: auto; width: 30px; height: 30px; border-radius: 8px; color: var(--ink-3); border: 1px solid var(--line); background: var(--card); display: grid; place-items: center; flex-shrink: 0; transition: 0.15s; }
@@ -348,7 +348,7 @@ kbd.k { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--lin
 .chat small.r { align-self: flex-end; }
 .modal-bg { position: fixed; inset: 0; z-index: 100; background: rgba(10, 12, 16, 0.5); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .modal { width: min(560px, 100%); max-height: 90vh; overflow-y: auto; background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--lift); padding: 22px; animation: tin 0.2s ease; }
-.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 10px; z-index: 200; }
+.toasts { position: fixed; right: 16px; top: 20vh; display: flex; flex-direction: column; gap: 10px; z-index: 200; }
 .toast { display: flex; gap: 10px; align-items: flex-start; width: min(360px, calc(100vw - 32px)); padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 12px; box-shadow: var(--lift); animation: tin 0.25s ease; }
 .toast.ok { border-left-color: var(--ok); }
 .toast.bad { border-left-color: var(--bad); }

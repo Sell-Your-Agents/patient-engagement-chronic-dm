@@ -179,8 +179,6 @@ function AppShell() {
         <div className="navlbl">Workspace</div>
         <nav className="sidenav" aria-label="Main">
           {NAV_ITEMS.map(navLink)}
-        </nav>
-        <nav className="sidenav mt-auto" aria-label="Preferences">
           {navLink(SETTINGS_ITEM)}
         </nav>
       </aside>
