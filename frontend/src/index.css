@@ -501,3 +501,29 @@ kbd.k { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--lin
 .notif-x { position: absolute; right: 7px; bottom: 9px; width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; color: var(--ink-3); opacity: 0.55; transition: opacity 0.15s, background 0.15s, color 0.15s; }
 .notif-item:hover .notif-x, .notif-x:focus-visible { opacity: 1; }
 .notif-x:hover { background: var(--bad-bg); color: var(--bad); }
+
+/* Follow-ups table: one row per call, each item = outcome pill + reason + meta */
+table.t.fu td { vertical-align: top; padding-top: 14px; padding-bottom: 14px; }
+table.t.fu td:first-child { box-shadow: inset 3px 0 0 transparent; }
+table.t.fu tr.fu-urgent td { background: color-mix(in srgb, var(--bad-bg) 55%, transparent); }
+table.t.fu tr.fu-urgent td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
+table.t.fu tr.fu-high td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+table.t.fu tr:hover td { background: var(--card-2); }
+table.t.fu tr.fu-urgent:hover td { background: var(--bad-bg); }
+table.t.fu .who { align-items: flex-start; }
+.fu-prio { min-width: 64px; justify-content: center; }
+.fu-details { min-width: 300px; max-width: 440px; }
+.fu-items { display: flex; flex-direction: column; gap: 10px; }
+.fu-item { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.fu-item + .fu-item { padding-top: 10px; border-top: 1px solid var(--line-2); }
+.fu-reason { font-size: 13.5px; line-height: 1.45; color: var(--ink); margin: 0; }
+.fu-meta { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-3); margin: 0; }
+.fu-note { font-size: 12px; line-height: 1.4; color: var(--ink-2); background: var(--card-2); border: 1px solid var(--line-2); border-radius: 6px; padding: 3px 8px; margin: 2px 0 0; }
+.fu-note b { font-weight: 700; color: var(--ink-3); margin-right: 4px; }
+.fu-item.is-closed { opacity: 0.6; }
+.fu-when { white-space: nowrap; font-size: 13px; color: var(--ink); }
+.fu-when span { display: block; font-weight: 600; }
+.fu-when a { display: inline-block; margin-top: 3px; font-size: 12px; font-weight: 600; color: var(--accent); }
+.fu-when a:hover { text-decoration: underline; }
+table.t.fu tr.fu-closed .fu-reason, table.t.fu tr.fu-closed .who b, table.t.fu tr.fu-closed .fu-when span { color: var(--ink-2); }
+table.t.fu tr.fu-closed .fu-prio { opacity: 0.7; }

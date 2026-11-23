@@ -21,12 +21,37 @@ const PRIORITY_PILL: Record<string, { label: string; cls: string }> = {
   high: { label: 'High', cls: 'warn' },
   normal: { label: 'Normal', cls: 'mute' },
 }
+const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2 }
+
+/** All follow-ups raised by one call, shown as a single row. */
+type CallGroup = {
+  key: string
+  items: FollowUp[]
+  lead: FollowUp // newest item: supplies who / when / call link
+  priority: string
+  pending: FollowUp[]
+}
+
+function groupByCall(items: FollowUp[]): CallGroup[] {
+  const map = new Map<string, FollowUp[]>()
+  for (const t of items) {
+    const key = t.call_log_id != null ? `call-${t.call_log_id}` : `fu-${t.id}`
+    const list = map.get(key)
+    if (list) list.push(t)
+    else map.set(key, [t])
+  }
+  return [...map.entries()].map(([key, list]) => {
+    const priority = list.reduce((best, t) => ((PRIORITY_RANK[t.priority] ?? 2) < (PRIORITY_RANK[best] ?? 2) ? t.priority : best), 'normal')
+    return { key, items: list, lead: list[0]!, priority, pending: list.filter((t) => t.status === 'pending') }
+  })
+}
 
 export function FollowUpsPage() {
   const [tab, setTab] = useState<Tab>('pending')
   const [kind, setKind] = useState('')
   const [page, setPage] = useState(1)
-  const [closing, setClosing] = useState<FollowUp | null>(null)
+  const [closing, setClosing] = useState<FollowUp[] | null>(null)
+  const [reopening, setReopening] = useState(false)
   const [adding, setAdding] = useState(false)
   const { data, isLoading, error, refetch } = useFollowUps()
   const { data: info } = useClinicInfo()
@@ -35,11 +60,24 @@ export function FollowUpsPage() {
   const all = (data || [])
     .filter((t) => !kind || t.kind === kind)
     .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
-  const pending = all.filter((t) => t.status === 'pending')
-  const finished = all.filter((t) => t.status !== 'pending')
-  const urgent = pending.filter((t) => t.priority === 'urgent').length
-  const shown = tab === 'pending' ? pending : tab === 'done' ? finished : all
+  const pending = groupByCall(all.filter((t) => t.status === 'pending'))
+  const finished = groupByCall(all.filter((t) => t.status !== 'pending'))
+  const allGroups = groupByCall(all)
+  const urgent = pending.filter((g) => g.priority === 'urgent').length
+  const shown = tab === 'pending' ? pending : tab === 'done' ? finished : allGroups
   const paged = paginate(shown, page, setPage, 15)
+
+  const reopen = async (items: FollowUp[]) => {
+    setReopening(true)
+    try {
+      await Promise.all(items.map((t) => update.mutateAsync({ id: t.id, status: 'pending' })))
+      toast.info('Moved back to the call-back list')
+    } catch (e) {
+      toast.error('Could not reopen', errorText(e, 'Please try again.'))
+    } finally {
+      setReopening(false)
+    }
+  }
 
   return (
     <div>
@@ -52,7 +90,7 @@ export function FollowUpsPage() {
                 [
                   ['pending', 'To call back', pending.length],
                   ['done', 'Done', finished.length],
-                  ['all', 'All', all.length],
+                  ['all', 'All', allGroups.length],
                 ] as const
               ).map(([k, l, n]) => (
                 <button
@@ -131,11 +169,15 @@ export function FollowUpsPage() {
                 </tr>
               </thead>
               <tbody>
-                {paged.pageItems.map((t) => {
-                  const pr = PRIORITY_PILL[t.priority] || PRIORITY_PILL.normal!
-                  const isUrgent = t.priority === 'urgent' && t.status === 'pending'
+                {paged.pageItems.map((g) => {
+                  const t = g.lead
+                  const pr = PRIORITY_PILL[g.priority] || PRIORITY_PILL.normal!
+                  const isUrgent = g.priority === 'urgent' && g.pending.length > 0
+                  const outcomes = [...new Map(g.items.map((i) => [followUpOutcome(i), followUpOutcomeTone(i)])).entries()]
+                  const needsConfirm = g.pending.some((i) => i.kind === 'confirm_appointment')
+                  const needsCancel = g.pending.some((i) => i.kind === 'cancel_request')
                   return (
-                    <tr key={t.id} style={isUrgent ? { background: 'var(--bad-bg)' } : undefined}>
+                    <tr key={g.key} style={isUrgent ? { background: 'var(--bad-bg)' } : undefined}>
                       <td>
                         <span className={`pill ${pr.cls}`} style={{ width: 70, justifyContent: 'center' }}>
                           {pr.label}
@@ -165,14 +207,30 @@ export function FollowUpsPage() {
                         </div>
                       </td>
                       <td>
-                        <span className={`pill ${followUpOutcomeTone(t)}`}>{followUpOutcome(t)}</span>
+                        <div className="flex flex-col items-start gap-1">
+                          {outcomes.map(([label, tone]) => (
+                            <span key={label} className={`pill ${tone}`}>
+                              {label}
+                            </span>
+                          ))}
+                        </div>
                       </td>
                       <td className="max-w-[320px] text-[13px] text-ink-soft">
-                        {sentenceCase(t.reason) || '—'}
-                        {(t.doctor_requested || t.preferred_time) && (
-                          <small className="mt-1 block text-ink-muted">{plainTime([t.doctor_requested, t.preferred_time].filter(Boolean).join(' · '))}</small>
-                        )}
-                        {t.staff_notes && <small className="mt-1 block text-ink-muted">Note: {t.staff_notes}</small>}
+                        {/* Fixed height keeps every row the same size; longer details scroll inside the cell. */}
+                        <div className="flex h-[84px] flex-col overflow-y-auto pr-1">
+                        <div className="my-auto">
+                        {g.items.map((i, idx) => (
+                          <div key={i.id} className={idx > 0 ? 'mt-2 border-t border-dashed border-line pt-2' : undefined}>
+                            {g.items.length > 1 && <small className="block font-bold text-ink-muted">{followUpOutcome(i)}</small>}
+                            {sentenceCase(i.reason) || '—'}
+                            {(i.doctor_requested || i.preferred_time) && (
+                              <small className="mt-1 block text-ink-muted">{plainTime([i.doctor_requested, i.preferred_time].filter(Boolean).join(' · '))}</small>
+                            )}
+                            {i.staff_notes && <small className="mt-1 block text-ink-muted">Note: {i.staff_notes}</small>}
+                          </div>
+                        ))}
+                        </div>
+                        </div>
                       </td>
                       <td className="whitespace-nowrap text-[13px]">
                         {friendlyTime(t.created_at, true)}
@@ -183,34 +241,27 @@ export function FollowUpsPage() {
                         )}
                       </td>
                       <td>
-                        <StatusBadge status={t.status} />
+                        <StatusBadge status={g.pending.length > 0 ? 'pending' : t.status} />
                       </td>
                       <td>
                         <div className="flex justify-end gap-1.5">
-                          {t.status === 'pending' && t.kind === 'confirm_appointment' && (
+                          {needsConfirm && (
                             <Link to="/appointments" className="btn sm p">
                               Confirm visit
                             </Link>
                           )}
-                          {t.status === 'pending' && t.kind === 'cancel_request' && (
+                          {needsCancel && (
                             <Link to="/appointments" className="btn sm d">
                               Confirm cancel
                             </Link>
                           )}
-                          {t.status === 'pending' && (
-                            <button
-                              className={`btn sm ${t.kind === 'confirm_appointment' || t.kind === 'cancel_request' ? '' : 'p'}`}
-                              onClick={() => setClosing(t)}
-                            >
+                          {g.pending.length > 0 && (
+                            <button className={`btn sm ${needsConfirm || needsCancel ? '' : 'p'}`} onClick={() => setClosing(g.pending)}>
                               Mark done
                             </button>
                           )}
-                          {t.status !== 'pending' && (
-                            <button
-                              className="btn sm"
-                              disabled={update.isPending}
-                              onClick={() => update.mutate({ id: t.id, status: 'pending' }, { onSuccess: () => toast.info('Moved back to the call-back list') })}
-                            >
+                          {g.pending.length === 0 && (
+                            <button className="btn sm" disabled={reopening} onClick={() => reopen(g.items)}>
                               Reopen
                             </button>
                           )}
@@ -226,38 +277,50 @@ export function FollowUpsPage() {
         {!isLoading && <Pagination paged={paged} noun="follow-ups" />}
       </div>
 
-      {closing && <CloseModal task={closing} onClose={() => setClosing(null)} />}
+      {closing && <CloseModal tasks={closing} onClose={() => setClosing(null)} />}
       {adding && <AddModal onClose={() => setAdding(false)} />}
     </div>
   )
 }
 
-function CloseModal({ task, onClose }: { task: FollowUp; onClose: () => void }) {
+function CloseModal({ tasks, onClose }: { tasks: FollowUp[]; onClose: () => void }) {
   const update = useUpdateFollowUp()
-  const [notes, setNotes] = useState(task.staff_notes || '')
-  const finish = (status: 'done' | 'cancelled') =>
-    update.mutate(
-      { id: task.id, status, staff_notes: notes },
-      {
-        onSuccess: () => {
-          toast.success(status === 'done' ? 'Follow-up done' : 'Follow-up closed', task.patient_name || '')
-          onClose()
-        },
-        onError: (e) => toast.error('Could not save', errorText(e, 'Please try again.')),
-      },
-    )
+  const task = tasks[0]!
+  const [notes, setNotes] = useState(tasks.map((t) => t.staff_notes).find(Boolean) || '')
+  const [saving, setSaving] = useState(false)
+  const reasons = tasks.map((t) => t.reason).filter(Boolean)
+  const finish = async (status: 'done' | 'cancelled') => {
+    setSaving(true)
+    try {
+      await Promise.all(tasks.map((t) => update.mutateAsync({ id: t.id, status, staff_notes: notes })))
+      toast.success(status === 'done' ? 'Follow-up done' : 'Follow-up closed', task.patient_name || '')
+      onClose()
+    } catch (e) {
+      toast.error('Could not save', errorText(e, 'Please try again.'))
+    } finally {
+      setSaving(false)
+    }
+  }
   return (
     <Modal open onClose={onClose} title="Close this follow-up" subtitle={`${task.patient_name || 'Caller'} · ${task.phone_number || 'no number'}`}>
-      {task.reason && (
-        <p className="mb-3 text-[13.5px]">
+      {reasons.length > 0 && (
+        <div className="mb-3 text-[13.5px]">
           <span className="lbl block">They needed</span>
-          {task.reason}
-        </p>
+          {reasons.length === 1 ? (
+            reasons[0]
+          ) : (
+            <ul className="list-disc pl-5">
+              {reasons.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
-      {task.kind === 'confirm_appointment' && (
+      {tasks.some((t) => t.kind === 'confirm_appointment') && (
         <p className="warnbox mb-3 text-[13px]">This only closes the task. To confirm the visit, use Confirm on the Appointments page (that closes this task too).</p>
       )}
-      {task.kind === 'cancel_request' && (
+      {tasks.some((t) => t.kind === 'cancel_request') && (
         <p className="warnbox mb-3 text-[13px]">
           This only closes the task: the appointment is not cancelled. To cancel it, use Confirm cancel on the Appointments page (that closes this task
           too).
@@ -268,11 +331,11 @@ function CloseModal({ task, onClose }: { task: FollowUp; onClose: () => void }) 
         <textarea className="field !h-24 py-2" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Called, answered the insurance question" autoFocus />
       </label>
       <div className="mt-4 flex justify-end gap-2">
-        <button className="btn d" disabled={update.isPending} onClick={() => finish('cancelled')}>
+        <button className="btn d" disabled={saving} onClick={() => finish('cancelled')}>
           Not needed
         </button>
-        <button className="btn p" disabled={update.isPending} onClick={() => finish('done')}>
-          {update.isPending && <Spinner />} Called them, done
+        <button className="btn p" disabled={saving} onClick={() => finish('done')}>
+          {saving && <Spinner />} Called them, done
         </button>
       </div>
     </Modal>
