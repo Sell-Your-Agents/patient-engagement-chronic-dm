@@ -58,6 +58,23 @@ class Settings(BaseSettings):
     deepgram_api_key: str = ""
     deepgram_project_id: str = ""
     sarvam_api_key: str = ""
+    # Agent voice: "sarvam" (default) or "plivo" (testing)
+    tts_provider: str = "sarvam"
+    # Plivo realtime text-to-speech, used when tts_provider is "plivo"
+    plivo_auth_id: str = ""
+    plivo_auth_token: str = ""
+    # Override the Plivo TTS WebSocket address; empty = the standard one for plivo_auth_id
+    plivo_tts_url: str | None = None
+    # Voice used when a call's language has no voice of its own
+    plivo_tts_default_language: str = "en-IN"
+    plivo_tts_default_voice_id: str = "H25SvwivznBqsIx1R7hX"
+    # Audio format Plivo sends back (Twilio media streams need 8 kHz mu-law)
+    plivo_tts_sample_rate: int = 8000
+    plivo_tts_encoding: str = "pcm_mulaw"
+
+    @property
+    def plivo_tts_ws_url(self) -> str:
+        return self.plivo_tts_url or f"wss://api.plivo.com/v1/Account/{self.plivo_auth_id}/TTS/Realtime/"
 
     # Application
     app_name: str = "Six Sigma Clinic AI Calling Agent"

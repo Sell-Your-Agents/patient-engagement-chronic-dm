@@ -73,6 +73,9 @@ class CallSession:
         self.stream_sid: Optional[str] = None
         self.deepgram_stt: Optional[DeepgramStream] = None
         self.sarvam_tts = SarvamTTSService()
+        # SarvamTTSService is PlivoTTSService when TTS_PROVIDER=plivo (see sarvam_tts_service.py)
+        tts_name = "Plivo" if type(self.sarvam_tts).__name__ == "PlivoTTSService" else "Sarvam"
+        logger.info(f"[{call_sid}] Agent voice: {tts_name}")
 
         self.selected_digit = "3"  # voice language (3 = English); the agent session sets it per call
         self.language: Optional[str] = None  # en | hi | te, for the lines the system says by itself
