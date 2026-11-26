@@ -655,15 +655,20 @@ async def run_call_stream(websocket: WebSocket, call_sid: str, db: AsyncSession,
             duration_seconds = int((datetime.utcnow() - session.started_at).total_seconds())
             await session.close()
             recording = await session.recorder.save(session.call.id) if session.recorder else None
+            finalized = False
             try:
                 await finalize_call(session.call.id, db, transcript, duration_seconds)
+                finalized = True
             except Exception as exc:
                 logger.error(f"[{call_sid}] Finalize error: {exc}", exc_info=True)
-                # Never leave the call looking live because the summary step failed
-                await close_call_now(db, call_id=session.call.id)
-            logger.info(f"[{call_sid}] Call ended after {duration_seconds}s")
-            if recording:
-                await save_recording_url(db, session.call.id)
+            if finalized:
+                logger.info(f"[{call_sid}] Call ended after {duration_seconds}s")
+                if recording:
+                    await save_recording_url(db, session.call.id)
+            else:
+                # Never leave the call looking live (and the recording unlinked) because the summary step failed
+                await close_call_now(db, call_id=session.call.id, duration_seconds=duration_seconds, recording=bool(recording))
+                logger.info(f"[{call_sid}] Call ended after {duration_seconds}s (closed without a full summary)")
         else:
             # Setup failed before the session existed: close the call record anyway
             await close_call_now(db, call_sid=call_sid)

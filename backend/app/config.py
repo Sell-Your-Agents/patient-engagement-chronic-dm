@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     # Audio format Plivo sends back (Twilio media streams need 8 kHz mu-law)
     plivo_tts_sample_rate: int = 8000
     plivo_tts_encoding: str = "pcm_mulaw"
+    # Speaking speed, 1.0 = normal: English a little faster, Telugu / Hindi a little slower for clarity
+    plivo_tts_pace_en: float = 1.1
+    plivo_tts_pace: float = 0.9
 
     @property
     def plivo_tts_ws_url(self) -> str:

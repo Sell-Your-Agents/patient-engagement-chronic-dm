@@ -1,6 +1,8 @@
-from sqlalchemy import inspect, text
+import logging
+
+from sqlalchemy import String, event, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, Session
 
 from app.config import get_settings
 
@@ -10,6 +12,30 @@ class Base(DeclarativeBase):
 
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+
+@event.listens_for(Session, "before_flush")
+def _fit_text_to_columns(session, flush_context, instances) -> None:
+    """Shorten any text longer than its column (e.g. a long AI-written "preferred slot") instead of failing.
+
+    Without this one over-long value made PostgreSQL reject the whole save at the end of a call, and the
+    call stayed "live" with no summary or recording link.
+    """
+    for obj in list(session.new) + list(session.dirty):
+        try:
+            mapper = inspect(obj).mapper
+        except Exception:
+            continue
+        for attr in mapper.column_attrs:
+            column = attr.columns[0]
+            length = getattr(column.type, "length", None)
+            if not isinstance(column.type, String) or not length:
+                continue
+            value = getattr(obj, attr.key, None)
+            if isinstance(value, str) and len(value) > length:
+                setattr(obj, attr.key, value[: length - 1] + "…")
+                logger.warning(f"{mapper.class_.__name__}.{attr.key} was {len(value)} characters; shortened to {length}")
 
 
 def _connect_args() -> dict:

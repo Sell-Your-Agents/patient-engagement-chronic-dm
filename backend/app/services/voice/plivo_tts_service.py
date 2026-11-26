@@ -283,7 +283,8 @@ class PlivoTTSService:
                 "encoding": settings.plivo_tts_encoding,
                 "sample_rate": settings.plivo_tts_sample_rate,
             },
-            "pace": 0.9,
+            # Speaking speed (1.0 = normal). English at 0.9 sounded too slow; Telugu and Hindi keep 0.9.
+            "pace": settings.plivo_tts_pace_en if language.startswith("en") else settings.plivo_tts_pace,
         }
 
         await ws.send(json.dumps(message))
