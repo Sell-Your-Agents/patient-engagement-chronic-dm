@@ -31,7 +31,7 @@ settings = get_settings()
 REMIND_AFTER = {"urgent": timedelta(minutes=15), "high": timedelta(hours=1)}
 MAX_ITEMS = 60
 KIND_LABELS = {
-    "emergency": "Emergency: told to call 108",
+    "emergency": "Emergency: given the emergency number",
     "distress": "Caller in distress",
     "human_assistance": "Asked for staff",
     "unanswered_question": "Question not answered",

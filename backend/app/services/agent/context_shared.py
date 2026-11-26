@@ -112,6 +112,7 @@ def shared_rules() -> str:
         agent_name=settings.clinic_agent_name,
         org_name=settings.clinic_name,
         emergency_number=settings.emergency_number,
+        ambulance_number=settings.ambulance_number,
         mental_health_helpline=settings.mental_health_helpline,
     )
     facts = [
@@ -120,7 +121,8 @@ def shared_rules() -> str:
         ("Phone", settings.clinic_phone),
         ("Opening hours", settings.clinic_hours),
         ("Consultation fees", settings.clinic_fees),
-        ("Emergency number in India", settings.emergency_number),
+        ("Emergency number", settings.emergency_number),
+        ("Ambulance number", settings.ambulance_number),
     ]
     lines = "\n".join(f"- {label}: {value.strip()}" for label, value in facts if value and value.strip())
     return core + CLINIC_INFO.format(lines=lines)

@@ -149,7 +149,7 @@ function AgentCard() {
     { title: 'Takes callback requests', text: 'Missed calls and "please call me back" go to Follow-ups', on: true },
     { title: 'Passes on questions it cannot answer', text: 'Saved as "Question not answered" for staff to call back', on: true },
     // { title: 'Connects callers to the front desk', text: info?.human_transfer ? 'Hold music, then rings the front desk' : 'Off: set a front-desk number to turn it on; until then it takes a message', on: !!info?.human_transfer },
-    { title: 'Handles emergencies', text: 'Tells the caller to call 108 and adds an urgent follow-up', on: true },
+    { title: 'Handles emergencies', text: 'Gives the caller the emergency number and adds an urgent follow-up', on: true },
     { title: 'Remembers earlier calls', text: 'Knows what the same number asked last time', on: true },
   ]
   return (

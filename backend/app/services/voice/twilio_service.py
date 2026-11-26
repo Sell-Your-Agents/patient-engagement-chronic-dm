@@ -29,6 +29,15 @@ logger = logging.getLogger(__name__)
 FRAME_BYTES = 160  # 20 ms of 8 kHz mu-law
 MULAW_SILENCE = b"\xff"
 SAMPLE_RATE = 8000
+DIGIT_GAP_SECONDS = 1.0  # pause between spoken digits of a phone number
+# A lone digit sent to the TTS can be read as a decimal ("0.9"), so each digit is sent as a word.
+# Keys are the voice digits: 1 = Telugu, 2 = Hindi, 3 = English.
+DIGIT_WORDS = {
+    "3": ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"],
+    "2": ["शून्य", "एक", "दो", "तीन", "चार", "पाँच", "छह", "सात", "आठ", "नौ"],
+    "1": ["సున్నా", "ఒకటి", "రెండు", "మూడు", "నాలుగు", "ఐదు", "ఆరు", "ఏడు", "ఎనిమిది", "తొమ్మిది"],
+}
+DIGIT_RUN = re.compile(r"\d(?:[\s\-,.]?\d){3,}")  # 4+ digits, possibly written "98765 43210" or "9 8 7 6"
 # A caller interim transcript this long interrupts the agent (shorter ones are often "mm" / noise)
 BARGE_IN_MIN_WORDS = 2
 # Max tokens per reply. Replies are short, but one reply can also carry hidden tokens (an appointment
@@ -168,7 +177,35 @@ class CallSession:
                 pass
 
     async def _say(self, text: str, is_current: Callable[[], bool], digit: Optional[str] = None) -> bool:
-        """Synthesise one sentence and send its audio as it arrives. False if interrupted.
+        """Say one sentence. Phone-like digit runs (4+ digits) are spoken one digit at a time with a
+        DIGIT_GAP_SECONDS pause between digits so the caller can write them down. False if interrupted."""
+        pos = 0
+        for match in DIGIT_RUN.finditer(text):
+            before = text[pos:match.start()]
+            if before.strip() and not await self._say_chunk(before, is_current, digit):
+                return False
+            digits = re.sub(r"\D", "", match.group())
+            for i, d in enumerate(digits):
+                words = DIGIT_WORDS.get(digit or self.selected_digit, DIGIT_WORDS["3"])
+                if not await self._say_chunk(words[int(d)], is_current, digit):
+                    return False
+                if i < len(digits) - 1 and not await self._pause(DIGIT_GAP_SECONDS, is_current):
+                    return False
+            pos = match.end()
+        rest = text[pos:]
+        if rest.strip():
+            return await self._say_chunk(rest, is_current, digit)
+        return is_current()
+
+    async def _pause(self, seconds: float, is_current: Callable[[], bool]) -> bool:
+        """Send silence to the caller (counts as playing time, so barge-in handling stays correct)."""
+        if not is_current():
+            return False
+        await self.send_audio_to_caller(MULAW_SILENCE * int(seconds * SAMPLE_RATE))
+        return is_current()
+
+    async def _say_chunk(self, text: str, is_current: Callable[[], bool], digit: Optional[str] = None) -> bool:
+        """Synthesise one piece of text and send its audio as it arrives. False if interrupted.
 
         digit picks the voice language (see SarvamTTSService); default: the call's language.
         """

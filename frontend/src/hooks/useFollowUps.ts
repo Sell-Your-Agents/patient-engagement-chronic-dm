@@ -30,7 +30,7 @@ export interface FollowUp {
 
 /** The call outcome behind each follow-up, in the words staff read on the list (also the filter options). */
 export const FOLLOW_UP_KIND_LABELS: Record<string, string> = {
-  emergency: 'Emergency: told to call 108',
+  emergency: 'Emergency: given the emergency number',
   distress: 'Caller in distress',
   human_assistance: 'Asked for staff',
   unanswered_question: 'Question not answered',

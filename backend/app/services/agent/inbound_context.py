@@ -157,7 +157,7 @@ def _greeting_parts(call: CallLog, patient: Optional[Patient] = None) -> Tuple[L
     )
     if len(langs) == 1:
         # One language only: no need to ask
-        english = english.rsplit(" Would you like", 1)[0] + " How may I help you today?"
+        english = english.rsplit(" Would you like", 1)[0] + " Are you experiencing a medical emergency?"
         return [(one_line(english), langs[0])], langs[0]
     names = {"en": "English", "hi": "Hindi", "te": "Telugu"}
     offered = [names[code] for code in langs]
@@ -229,6 +229,8 @@ async def build_inbound_context(db: AsyncSession, call: CallLog, patient: Option
     prompt = RECEPTIONIST_PROMPT.format(
         agent_name=settings.clinic_agent_name,
         org_name=settings.clinic_name,
+        emergency_number=settings.emergency_number,
+        ambulance_number=settings.ambulance_number,
         now=now_text(),
         phone_text=phone or "not available",
         caller_hint=CALLER_HINT_KNOWN.format(name=patient.name) if patient else CALLER_HINT_UNKNOWN,

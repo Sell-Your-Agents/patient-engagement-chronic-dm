@@ -101,7 +101,8 @@ class Settings(BaseSettings):
     appointment_integration: str = "none"
 
     # Safety wording used by the agent (doctor to approve before going live)
-    emergency_number: str = "108"
+    emergency_number: str = "9674675335"
+    ambulance_number: str = "108"
     mental_health_helpline: str = "the Tele-MANAS helpline on 14416, which is free and open all day and night"
 
     # Hours clinic staff return calls (clinic time); used to suggest a callback time
