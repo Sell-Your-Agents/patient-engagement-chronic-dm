@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,10 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import get_current_user
 from app.database import get_db
 from app.models.appointment import Appointment
-from app.models.call_log import CallLog, CallTurn
+from app.models.call_log import CallLog, CallTurn, call_ref
 from app.models.callback_schedule import FollowUp
 from app.models.patient import Patient
 from app.models.user import User
+from app.services.voice.call_recorder import recording_path
 
 router = APIRouter(prefix="/api/calls", tags=["calls"])
 
@@ -42,6 +44,8 @@ class CallResponse(BaseModel):
     ended_at: Optional[datetime]
     duration_seconds: Optional[int]
     created_at: datetime
+    # Set when the call was recorded: GET /api/calls/{id}/recording plays it
+    recording_url: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -103,6 +107,7 @@ async def search_calls(
     booking_status: Optional[str] = Query(None, pattern="^(confirmed|pending|not_applicable)$"),
     patient_id: Optional[int] = Query(None),
     status: Optional[str] = Query(None, max_length=20),
+    finished_only: bool = Query(False, description="Leave out calls still in progress"),
     date_from: Optional[datetime] = Query(None, description="Calls at or after this time (ISO 8601)"),
     date_to: Optional[datetime] = Query(None, description="Calls before this time (ISO 8601)"),
     db: AsyncSession = Depends(get_db),
@@ -135,6 +140,8 @@ async def search_calls(
         filters.append(CallLog.patient_id == patient_id)
     if status:
         filters.append(CallLog.status == status)
+    if finished_only:
+        filters.append(CallLog.status != "in-progress")
 
     total = (await db.execute(select(func.count(CallLog.id)).where(*filters))).scalar() or 0
     result = await db.execute(
@@ -206,3 +213,13 @@ async def get_call(call_log_id: int, db: AsyncSession = Depends(get_db), _: User
     detail.linked = linked
     return detail
 
+
+
+@router.get("/{call_log_id}/recording")
+async def call_recording(call_log_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    """The call's recording (WAV), for signed-in clinic staff only."""
+    call = await db.get(CallLog, call_log_id)
+    path = recording_path(call_log_id)
+    if not call or not call.recording_url or not path.is_file():
+        raise HTTPException(status_code=404, detail="No recording for this call")
+    return FileResponse(path, media_type="audio/wav", filename=f"{call_ref(call_log_id)}.wav")

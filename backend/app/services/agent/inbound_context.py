@@ -147,7 +147,7 @@ def _greeting_parts(call: CallLog, patient: Optional[Patient] = None) -> Tuple[L
     saved = patient.preferred_language if patient else None
     if saved in langs and len(langs) > 1:
         line = GREETING_KNOWN[saved].format(
-            org_name=settings.clinic_name, agent_name=settings.clinic_agent_name, recording_line=recording_line(call)
+            org_name=settings.clinic_name, agent_name=settings.clinic_agent_name, recording_line=recording_line(call, saved)
         )
         return [(one_line(line), saved)], saved
     english = OPENING_EN.format(

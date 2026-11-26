@@ -28,6 +28,14 @@ export interface Appointment {
   change_note: string | null
   confirmed_at: string | null
   created_at: string
+  /** Summary of the call the agent recorded this on (the conversation context); null until summarised */
+  call_summary?: string | null
+  /** When that call happened (UTC) */
+  call_at?: string | null
+  /** en | hi | te */
+  call_language?: string | null
+  /** Name on the patient record (patient_name is the name as heard on the call) */
+  patient_saved_name?: string | null
 }
 
 export interface AppointmentParams {

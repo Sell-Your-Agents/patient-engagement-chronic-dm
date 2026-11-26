@@ -8,7 +8,7 @@ A patient's cancellation request ("cancel_requested") is settled here too: staff
 cancellation (status cancelled) or keep the appointment (back to pending / confirmed).
 """
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -33,6 +33,7 @@ from app.models.callback_schedule import FOLLOWUP_PENDING, KIND_CANCEL_REQUEST, 
 from app.models.doctor import Doctor
 from app.models.user import User
 from app.routers.clinic import normalize_phone
+from app.routers.followups import saved_patient_names
 from app.services.agent.context_shared import lookup_caller
 from app.services.scheduling.appointment_service import appointment_when
 from app.services.scheduling.callback_service import close_appointment_follow_ups
@@ -66,9 +67,16 @@ class AppointmentResponse(BaseModel):
     change_note: Optional[str]
     confirmed_at: Optional[datetime]
     created_at: datetime
+    # The call the agent recorded this request on: its summary (the conversation context), when it
+    # happened (UTC) and its language. Empty for staff bookings, or until the call has been summarised.
+    call_summary: Optional[str] = None
+    call_at: Optional[datetime] = None
+    call_language: Optional[str] = None
+    # The name saved on the patient record (patient_name is the name as heard on the call)
+    patient_saved_name: Optional[str] = None
 
 
-def _out(a: Appointment) -> AppointmentResponse:
+def _out(a: Appointment, call: Optional[CallLog] = None, saved_name: Optional[str] = None) -> AppointmentResponse:
     return AppointmentResponse(
         id=a.id,
         doctor_id=a.doctor_id,
@@ -90,7 +98,28 @@ def _out(a: Appointment) -> AppointmentResponse:
         change_note=a.change_note,
         confirmed_at=a.confirmed_at,
         created_at=a.created_at,
+        call_summary=call.summary if call else None,
+        call_at=(call.started_at or call.created_at) if call else None,
+        call_language=call.language if call else None,
+        patient_saved_name=saved_name,
     )
+
+
+async def _calls_by_id(db: AsyncSession, appointments: List[Appointment]) -> Dict[int, CallLog]:
+    """The calls these appointments were recorded on, in one query."""
+    ids = {a.call_log_id for a in appointments if a.call_log_id}
+    if not ids:
+        return {}
+    rows = (await db.execute(select(CallLog).where(CallLog.id.in_(ids)))).scalars().all()
+    return {c.id: c for c in rows}
+
+
+async def _full(db: AsyncSession, appointment_id: int) -> AppointmentResponse:
+    """One appointment with its call details."""
+    appointment = await _load(db, appointment_id)
+    call = await db.get(CallLog, appointment.call_log_id) if appointment.call_log_id else None
+    names = await saved_patient_names(db, [appointment.patient_id])
+    return _out(appointment, call, names.get(appointment.patient_id))
 
 
 async def sync_call_booking_status(db: AsyncSession, call_log_id: Optional[int]) -> None:
@@ -149,7 +178,10 @@ async def list_appointments(
         query = query.where(Appointment.start_at < date_to.replace(tzinfo=None))
     query = query.order_by(Appointment.created_at.desc(), Appointment.id.desc())
     result = await db.execute(query.offset(skip).limit(limit))
-    return [_out(a) for a in result.scalars().all()]
+    appointments = list(result.scalars().all())
+    calls = await _calls_by_id(db, appointments)
+    names = await saved_patient_names(db, [a.patient_id for a in appointments])
+    return [_out(a, calls.get(a.call_log_id), names.get(a.patient_id)) for a in appointments]
 
 
 class StaffAppointmentCreate(BaseModel):
@@ -191,12 +223,12 @@ async def create_appointment(
     )
     db.add(appointment)
     await db.commit()
-    return _out(await _load(db, appointment.id))
+    return await _full(db, appointment.id)
 
 
 @router.get("/{appointment_id}", response_model=AppointmentResponse)
 async def get_appointment(appointment_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    return _out(await _load(db, appointment_id))
+    return await _full(db, appointment_id)
 
 
 class AppointmentUpdate(BaseModel):
@@ -276,4 +308,4 @@ async def update_appointment(
     await sync_call_booking_status(db, appointment.call_log_id)
     await db.commit()
     db.expire(appointment)
-    return _out(await _load(db, appointment_id))
+    return await _full(db, appointment_id)

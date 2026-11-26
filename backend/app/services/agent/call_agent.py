@@ -25,7 +25,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -54,6 +54,7 @@ from app.services.agent.call_context import (
     build_call_context,
 )
 from app.services.agent.call_finalizer import finalize_call
+from app.services.agent.indian_name_matcher import asked_for_name, name_matcher
 from app.services.agent.context_shared import (
     LANGUAGE_DIGITS,
     LISTEN_BEFORE_CHOICE_DIGIT,
@@ -70,7 +71,8 @@ from app.services.scheduling.appointment_service import (
 from app.services.scheduling.callback_service import create_follow_up
 from app.services.voice.audio_utils import decode_twilio_payload
 from app.services.voice.stt_service import DeepgramStream
-from app.services.voice.telephony import can_transfer, start_call_recording, transfer_call
+from app.services.voice.call_recorder import CallRecorder
+from app.services.voice.telephony import can_transfer, transfer_call
 from app.services.voice.twilio_service import CallSession
 
 logger = logging.getLogger(__name__)
@@ -124,6 +126,8 @@ class CallAgentSession(CallSession):
         self._questions: set = set()
         self._transfer_pending = False
         self._stt_switch: Optional[asyncio.Task] = None
+        # Likely Indian names for a misheard name in the caller's last reply (only for the next reply)
+        self._name_hint: Optional[str] = None
         self.base_prompt = context.system_prompt
         self.set_prompt(context.system_prompt)
 
@@ -145,6 +149,8 @@ class CallAgentSession(CallSession):
             )
         if self.language:
             prompt += f"\nCALL LANGUAGE: the caller chose {self.language}. Speak only in that language.\n"
+        if self._name_hint:
+            prompt += f"\n{self._name_hint}\n"
         self.system_prompt = prompt
 
     def _remember(self, key: str, line: str) -> None:
@@ -162,6 +168,26 @@ class CallAgentSession(CallSession):
     def on_new_turn(self) -> None:
         # A token left unfinished by an interrupted reply must not swallow the next reply's speech
         self._token_buffer = ""
+
+    async def handle_transcript(self, text: str, is_final: bool) -> None:
+        if is_final and text:
+            self._update_name_hint(text)
+        await super().handle_transcript(text, is_final)
+
+    def _update_name_hint(self, text: str) -> None:
+        """If the agent just asked for a name, look for a misheard Indian name in the caller's reply."""
+        last_agent = next((t["content"] for t in reversed(self.conversation_history) if t["role"] == "assistant"), "")
+        hint = None
+        if asked_for_name(last_agent):
+            try:
+                hint = name_matcher.build_llm_name_hint(text)
+            except Exception as exc:
+                logger.warning(f"[{self.call_sid}] Name check failed: {exc}")
+        if hint:
+            logger.info(f"[{self.call_sid}] {hint[:160]}")
+        if hint != self._name_hint:
+            self._name_hint = hint
+            self.set_prompt(self.base_prompt)
 
     async def flush_agent_text(self) -> str:
         """End of a reply: speak any text held back waiting for a token that never closed."""
@@ -323,8 +349,24 @@ class CallAgentSession(CallSession):
             return f"+91{digits}"
         return f"+{digits}"
 
+    def _known_name(self, fields: Dict[str, str]) -> Optional[str]:
+        """The name the agent wrote in the token (confirmed with the caller), else one already recorded in this call.
+
+        Never the name saved for this phone number: family members share phones, so it may be someone else.
+        """
+        candidates = (
+            fields.get("name"),
+            self.appointment.patient_name if self.appointment else None,
+            self.callback.patient_name if self.callback else None,
+            self.call.patient_name,
+        )
+        for name in candidates:
+            if name and name.strip().lower() not in PLACEHOLDER_VALUES:
+                return name.strip()
+        return None
+
     def _name(self, fields: Dict[str, str]) -> str:
-        return fields.get("name") or (self.patient.name if self.patient else "") or self.call.patient_name or "Unknown"
+        return self._known_name(fields) or "Unknown"
 
     def _visit(self, fields: Dict[str, str]) -> Optional[datetime]:
         """The visit day and rough time (visit=YYYY-MM-DDTHH:MM; "slot" accepted from older prompts)."""
@@ -367,6 +409,11 @@ class CallAgentSession(CallSession):
                 f"{outcome.slot_problem}. Tell the caller and agree a day and time within the doctor's hours]]"
             )
         self._pending_notes.append(note)
+        if appointment.patient_name == "Unknown":
+            self._pending_notes.append(
+                "[[NAME_MISSING: the request was saved without the patient's name. Ask for the patient's full name, "
+                "read it back to confirm, then write the APPOINTMENT_REQUEST token again with name=]]"
+            )
         self._remember(
             "APPOINTMENT_REQUEST:",
             f"#{appointment.id} for {appointment.patient_name} with {await self._doctor_name(appointment)}, "
@@ -467,7 +514,7 @@ class CallAgentSession(CallSession):
             priority=priority,
             call_log_id=self.call_id,
             patient_id=self.patient.id if self.patient else None,
-            patient_name=fields.get("name") or self.call.patient_name or (self.patient.name if self.patient else None),
+            patient_name=self._known_name(fields),
             phone_number=self._phone(fields),
             reason=reason,
         )
@@ -502,6 +549,16 @@ class CallAgentSession(CallSession):
         self._escalated.add(kind)
         reason = "Caller described a possible emergency" if kind == KIND_EMERGENCY else "Caller sounded in emotional distress"
         await self._new_follow_up(kind, {}, reason)
+
+
+async def save_recording_url(db: AsyncSession, call_id: int) -> None:
+    """Point the call record at its recording (played to signed-in staff via GET /api/calls/{id}/recording)."""
+    try:
+        await db.execute(update(CallLog).where(CallLog.id == call_id).values(recording_url=f"/api/calls/{call_id}/recording"))
+        await db.commit()
+    except Exception as exc:
+        logger.error(f"Could not save the recording link of call #{call_id}: {exc}")
+        await db.rollback()
 
 
 async def run_call_stream(websocket: WebSocket, call_sid: str, db: AsyncSession, accept: bool = True) -> None:
@@ -563,7 +620,9 @@ async def run_call_stream(websocket: WebSocket, call_sid: str, db: AsyncSession,
                 call.stream_sid = session.stream_sid
                 logger.info(f"[{call_sid}] Stream started: {session.stream_sid}")
                 if is_recorded(call):
-                    asyncio.create_task(start_call_recording(call.call_sid))
+                    # Recorded on our own server: works for phone calls and browser test calls alike
+                    session.recorder = CallRecorder(session._now())
+                    logger.info(f"[{call_sid}] Recording this call")
                 await session.add_turn("assistant", context.greeting)
                 asyncio.create_task(session.speak_parts(
                     [(text, LANGUAGE_DIGITS.get(lang, "3")) for text, lang in context.greeting_parts]
@@ -571,15 +630,18 @@ async def run_call_stream(websocket: WebSocket, call_sid: str, db: AsyncSession,
                 # From now on: "Are you still there?" after silence, and a maximum call length
                 session.start_watchdog()
             elif event == "media":
+                audio = decode_twilio_payload(data["media"]["payload"])
+                if session.recorder:
+                    session.recorder.add_caller(audio, session._now())
                 if session.deepgram_stt:
-                    await session.deepgram_stt.send_audio(decode_twilio_payload(data["media"]["payload"]))
+                    await session.deepgram_stt.send_audio(audio)
             elif event == "stop":
                 logger.info(f"[{call_sid}] Stream stopped")
                 break
 
-    except WebSocketDisconnect:
-        # The caller hung up (or the browser tab closed) without a "stop" event: a normal end
-        logger.info(f"[{call_sid}] Media stream disconnected")
+    except WebSocketDisconnect as exc:
+        # The connection closed without a "stop" event: a phone hang-up, a closed tab or a dropped network
+        logger.info(f"[{call_sid}] Media stream disconnected (code {exc.code})")
     except Exception as exc:
         logger.error(f"[{call_sid}] Call stream error: {exc}", exc_info=True)
     finally:
@@ -592,12 +654,21 @@ async def run_call_stream(websocket: WebSocket, call_sid: str, db: AsyncSession,
             transcript = session.transcript_text
             duration_seconds = int((datetime.utcnow() - session.started_at).total_seconds())
             await session.close()
+            recording = await session.recorder.save(session.call.id) if session.recorder else None
+            finalized = False
             try:
                 await finalize_call(session.call.id, db, transcript, duration_seconds)
+                finalized = True
             except Exception as exc:
                 logger.error(f"[{call_sid}] Finalize error: {exc}", exc_info=True)
-                # Never leave the call looking live because the summary step failed
-                await close_call_now(db, call_id=session.call.id)
+            if finalized:
+                logger.info(f"[{call_sid}] Call ended after {duration_seconds}s")
+                if recording:
+                    await save_recording_url(db, session.call.id)
+            else:
+                # Never leave the call looking live (and the recording unlinked) because the summary step failed
+                await close_call_now(db, call_id=session.call.id, duration_seconds=duration_seconds, recording=bool(recording))
+                logger.info(f"[{call_sid}] Call ended after {duration_seconds}s (closed without a full summary)")
         else:
             # Setup failed before the session existed: close the call record anyway
             await close_call_now(db, call_sid=call_sid)

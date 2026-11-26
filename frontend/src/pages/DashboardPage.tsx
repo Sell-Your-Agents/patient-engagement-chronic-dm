@@ -1,12 +1,11 @@
 import { useState } from 'react'
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { useDashboard, type DashboardData } from '../hooks/useKpis'
-import { INTENT_LABELS, LANGUAGE_LABELS } from '../hooks/useCalls'
+import { INTENT_LABELS, LANGUAGE_LABELS, useCallPage, callerName } from '../hooks/useCalls'
 import { useClinicInfo } from '../hooks/useClinic'
-import { PageHeader, Kpi, Panel, Loader, ErrorState, EmptyState, formatTime } from '../components/ui'
+import { PageHeader, Kpi, Panel, Loader, ErrorState, EmptyState, Avatar, formatTime, friendlyTime, formatLength } from '../components/ui'
 import { useAppointments } from '../hooks/useAppointments'
-import { AppointmentStatusBadge, localISODate } from '../components/clinic'
-import { Icon } from '../components/Icon'
+import { AppointmentStatusBadge, IntentBadge, BookingBadge, localISODate } from '../components/clinic'
 
 export function DashboardPage() {
   const { data, isLoading, error, refetch } = useDashboard(7)
@@ -16,7 +15,7 @@ export function DashboardPage() {
   if (error || !data) return <ErrorState text="Could not load the dashboard" onRetry={() => refetch()} />
 
   const pendingNote =
-    info?.appointment_integration === 'none' ? 'No clinic booking system connected: staff confirm every request' : 'Waiting for staff to confirm'
+    info?.appointment_integration === 'none' ? 'No clinic booking system connected: staff confirm every request' : 'Pending until staff confirm'
 
   return (
     <div>
@@ -40,19 +39,24 @@ export function DashboardPage() {
           valueTone={data.urgent_follow_ups ? 'bad' : undefined}
           to="/follow-ups"
         />
-        <Kpi label="Pending confirmation" value={data.pending_appointments} hint={pendingNote} icon="calendar" tone="violet" to="/appointments" />
-        <Kpi label="Confirmed by Staff" value={data.confirmed_upcoming} hint="Upcoming visits" icon="checkCircle" tone="ok" to="/appointments" />
+        <Kpi label="Pending appointments" value={data.pending_appointments} hint={pendingNote} icon="calendar" tone="violet" to="/appointments" />
+        <Kpi label="Upcoming visits" value={data.confirmed_upcoming} hint="Confirmed by staff, from today" icon="checkCircle" tone="ok" to="/appointments" />
       </div>
 
-      {/* Two cards side by side: calls over time | why and in which language */}
+      {/* Row 2: today's schedule | calls per day */}
       <div className="grid g2 mb-3.5">
+        <TodaySchedule />
         <Panel
           title={`Calls per day · last ${data.days} days`}
           subtitle={`${data.calls_period} calls · ${data.appointment_requests_period} appointment requests (${data.request_rate}% of calls)`}
         >
           <CallsChart data={data} />
         </Panel>
-        <Panel title="Why people called" subtitle={`Caller intent and language · last ${data.days} days`}>
+      </div>
+
+      {/* Row 3: why people called | the last five calls */}
+      <div className="grid g2">
+        <Panel title="Patient Inquiries" subtitle={`Why people called · last ${data.days} days`}>
           <ShareBars counts={data.intents} labels={INTENT_LABELS} empty="No calls yet" />
           <div className="mx-4 mb-4 border-t border-line-soft pt-3">
             <div className="lbl mb-2">Languages</div>
@@ -75,12 +79,7 @@ export function DashboardPage() {
             )}
           </div>
         </Panel>
-      </div>
-
-      {/* Today's appointments beside the agent */}
-      <div className="grid gap-[14px] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
-        <TodaySchedule />
-        <AgentCard />
+        <RecentCalls />
       </div>
     </div>
   )
@@ -121,7 +120,7 @@ function TodaySchedule() {
                 <span className="relative mt-1.5 h-2.5 w-2.5 rounded-full" style={{ background: dot[a.status] || 'var(--mute)' }} />
               </div>
               <div className="min-w-0 flex-1 pb-4">
-                <b className="block truncate text-[14px]">{a.patient_name}</b>
+                <b className="block truncate text-[14px]">{a.patient_saved_name || a.patient_name}</b>
                 <small className="block truncate text-[12.5px] text-ink-muted" title={[a.doctor_name, a.reason].filter(Boolean).join(' · ')}>
                   {[a.doctor_name, a.reason].filter(Boolean).join(' · ')}
                 </small>
@@ -137,44 +136,53 @@ function TodaySchedule() {
   )
 }
 
-/** The AI agent itself: what it can do on a call, and whether each ability is switched on. */
-function AgentCard() {
-  const { data: info } = useClinicInfo()
-  const agent = info?.agent_name || 'Agent'
-  const langs = (info?.languages || []).map((l) => l.name)
-  const abilities: { title: string; text: string; on: boolean }[] = [
-    { title: 'Answers every call', text: `In ${langs.join(', ') || 'English'}; greets saved patients in their own language`, on: true },
-    { title: 'Records appointment requests', text: info?.appointment_integration === 'none' ? 'Doctor, time and reason; staff confirm on Appointments' : 'Books straight into the clinic system', on: true },
-    { title: 'Answers doctor and timing questions', text: 'Only from the Doctors and Clinic Knowledge pages, never made up', on: true },
-    { title: 'Takes callback requests', text: 'Missed calls and "please call me back" go to Follow-ups', on: true },
-    { title: 'Passes on questions it cannot answer', text: 'Saved as "Question not answered" for staff to call back', on: true },
-    // { title: 'Connects callers to the front desk', text: info?.human_transfer ? 'Hold music, then rings the front desk' : 'Off: set a front-desk number to turn it on; until then it takes a message', on: !!info?.human_transfer },
-    { title: 'Handles emergencies', text: 'Gives the caller the emergency number and adds an urgent follow-up', on: true },
-    { title: 'Remembers earlier calls', text: 'Knows what the same number asked last time', on: true },
-  ]
+/** The last five finished calls; click one to open it, or All for Call Records. */
+function RecentCalls() {
+  const navigate = useNavigate()
+  const { data, isLoading } = useCallPage({ page: 1, page_size: 5, finished_only: true })
+  const calls = data?.items || []
   return (
     <Panel
-      title={`${agent} · AI calling agent`}
-      subtitle={`What ${agent} can do on a call`}
+      className="flex min-w-0 flex-col"
+      title="Latest calls"
+      subtitle="The most recent calls to the clinic"
       right={
-        <Link to="/call-agent" className="btn sm p">
-          <Icon name="phone" className="h-3.5 w-3.5" /> Test call
+        <Link to="/calls" className="btn sm">
+          All
         </Link>
       }
     >
-      <div className="grid gap-2 px-4 pb-4 sm:grid-cols-2">
-        {abilities.map((ab) => (
-          <div key={ab.title} className={`flex min-w-0 items-start gap-2.5 rounded-[10px] border border-line-soft p-2.5 ${ab.on ? '' : 'opacity-60'}`}>
-            <span className={`ico ${ab.on ? 'ok' : 'mute'} !h-6 !w-6 shrink-0`}>
-              <Icon name={ab.on ? 'check' : 'x'} className="h-3.5 w-3.5" />
-            </span>
-            <div className="min-w-0">
-              <b className="block text-[13px] leading-snug">{ab.title}</b>
-              <small className="block text-[12px] leading-snug text-ink-muted">{ab.text}</small>
-            </div>
-          </div>
-        ))}
-      </div>
+      {isLoading ? null : calls.length === 0 ? (
+        <EmptyState icon="phone" text="No calls yet." />
+      ) : (
+        <div className="px-2 pb-3">
+          {calls.map((c) => {
+            const name = callerName(c) || 'Unknown caller'
+            return (
+              <button
+                key={c.id}
+                type="button"
+                className="recent-call"
+                onClick={() => navigate({ to: '/calls/$id', params: { id: String(c.id) }, search: { from: 'dashboard' } })}
+                title="Open this call: transcript and recording"
+              >
+                <Avatar name={name} size={32} />
+                <span className="min-w-0 flex-1">
+                  <b className="block truncate text-[13.5px]">{name}</b>
+                  <small className="block truncate text-[12px] text-ink-muted">
+                    {c.call_ref} · {friendlyTime(c.started_at || c.created_at, true)} · {formatLength(c.duration_seconds)}
+                    {c.language ? ` · ${LANGUAGE_LABELS[c.language] || c.language}` : ''}
+                  </small>
+                </span>
+                <span className="flex shrink-0 flex-col items-end gap-1">
+                  <IntentBadge intent={c.intent} />
+                  {c.booking_status && c.booking_status !== 'not_applicable' && <BookingBadge status={c.booking_status} />}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </Panel>
   )
 }

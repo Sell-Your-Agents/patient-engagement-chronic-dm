@@ -11,3 +11,6 @@ __pycache__/
 *.sqlite
 *.sqlite3
 logs/
+
+# Call recordings stay on the server, never in the image
+recordings/

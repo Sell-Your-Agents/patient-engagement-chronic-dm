@@ -110,7 +110,7 @@ async def _build(db: AsyncSession, user: User) -> List[Notification]:
         when = a.start_at.strftime("%a %d %b, %I:%M %p").replace(" 0", " ") if a.start_at else (a.preferred_time or "time to be agreed")
         items.append(dict(
             key=f"appt:{a.id}:pending", group="appointment", kind="appointment_request", severity="medium",
-            title=f"Confirm appointment · {a.patient_name}",
+            title=f"Pending appointment · {a.patient_name}",
             body=f"{a.doctor_requested or 'Doctor'} · {when}" + (f" · {a.reason}" if a.reason else ""),
             at=a.created_at, link="/appointments", ref_id=a.id, action=None, needs_action=True,
         ))

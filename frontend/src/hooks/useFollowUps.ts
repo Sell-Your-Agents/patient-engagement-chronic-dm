@@ -26,6 +26,17 @@ export interface FollowUp {
   staff_notes: string | null
   completed_at: string | null
   created_at: string
+  /** Name on the patient record (patient_name is the name as heard on the call) */
+  patient_saved_name?: string | null
+}
+
+/** The patient's saved name, and the name heard on the call only when it is spelled differently. */
+export function savedAndHeard(x: { patient_saved_name?: string | null; patient_name: string | null }) {
+  const saved = x.patient_saved_name?.trim() || null
+  const heard = x.patient_name?.trim() || null
+  const name = saved || heard
+  const said = saved && heard && saved.toLowerCase() !== heard.toLowerCase() ? heard : null
+  return { name, said }
 }
 
 /** The call outcome behind each follow-up, in the words staff read on the list (also the filter options). */
@@ -35,7 +46,7 @@ export const FOLLOW_UP_KIND_LABELS: Record<string, string> = {
   human_assistance: 'Asked for staff',
   unanswered_question: 'Question not answered',
   callback: 'Callback requested',
-  confirm_appointment: 'Appointment request: needs confirming',
+  confirm_appointment: 'Pending appointment: needs confirming',
   cancel_request: 'Wants to cancel appointment',
   rescheduled: 'Patient rescheduled appointment',
   staff: 'Added by staff',
@@ -69,6 +80,14 @@ export function followUpOutcome(t: Pick<FollowUp, 'kind' | 'transfer_status'>) {
 export function followUpOutcomeTone(t: Pick<FollowUp, 'kind' | 'transfer_status'>) {
   if (t.kind === 'human_assistance' && t.transfer_status === 'answered') return 'ok'
   return FOLLOW_UP_KIND_TONE[t.kind] || 'mute'
+}
+
+/** One row per call on the Follow-ups page: all tasks from the same call count once. Used for every follow-up count. */
+export function followUpRowKey(t: Pick<FollowUp, 'id' | 'call_log_id'>) {
+  return t.call_log_id != null ? `call-${t.call_log_id}` : `fu-${t.id}`
+}
+export function countFollowUpRows(items: Pick<FollowUp, 'id' | 'call_log_id'>[]) {
+  return new Set(items.map(followUpRowKey)).size
 }
 
 export function useFollowUps(status?: string) {

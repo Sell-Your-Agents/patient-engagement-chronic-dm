@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Link, useParams } from '@tanstack/react-router'
+import { Link, useParams, useSearch } from '@tanstack/react-router'
+import { backTarget } from '../lib/backNav'
 import { usePatient, usePatientFollowUps } from '../hooks/usePatients'
 import { useCallPage, INTENT_LABELS, LANGUAGE_LABELS } from '../hooks/useCalls'
 import { useAppointments } from '../hooks/useAppointments'
-import { followUpOutcome } from '../hooks/useFollowUps'
+import { followUpOutcome, countFollowUpRows } from '../hooks/useFollowUps'
 import { PageHeader, Panel, Loader, ErrorState, EmptyState, Avatar, friendlyTime, plainTime, formatDateTime, formatDate, formatLength, utcDate } from '../components/ui'
 import { AppointmentStatusBadge } from '../components/clinic'
 import { PatientFormModal } from '../components/PatientForm'
@@ -27,6 +28,8 @@ type Entry = {
 /** One person's whole story: who they are, what is still open, and a single timeline of calls, appointments and follow-ups. */
 export function PatientDetailPage() {
   const { id } = useParams({ from: '/patients/$id' })
+  // Opened from another page (Follow-ups, a call): back goes there; otherwise to the patient list
+  const { from } = useSearch({ from: '/patients/$id' })
   const patientId = Number(id)
   const [editing, setEditing] = useState(false)
   const [filter, setFilter] = useState<Filter>('all')
@@ -40,7 +43,8 @@ export function PatientDetailPage() {
 
   // Only counts here: staff act on these on the Appointments and Follow-ups pages
   const pendingAppointments = (appointments || []).filter((a) => a.status === 'pending').length
-  const openFollowUps = (followUps || []).filter((f) => f.status === 'pending' && f.kind !== 'confirm_appointment').length
+  // Counted like the Follow-ups page (one row per call), so the number matches what the link shows
+  const openFollowUps = countFollowUpRows((followUps || []).filter((f) => f.status === 'pending'))
 
   // ---- Timeline: calls, appointments and follow-ups together, newest first ----
   const entries: Entry[] = []
@@ -56,7 +60,7 @@ export function PatientDetailPage() {
         .filter(Boolean)
         .join(' · '),
       right: (
-        <Link to="/calls/$id" params={{ id: String(c.id) }} className={`btn sm ${c.status === 'in-progress' ? '!border-ok !bg-ok !text-white' : ''}`}>
+        <Link to="/calls/$id" params={{ id: String(c.id) }} search={{ from: `patient-${p.id}` }} className={`btn sm ${c.status === 'in-progress' ? '!border-ok !bg-ok !text-white' : ''}`}>
           {c.status === 'in-progress' ? 'Watch live' : 'View'}
         </Link>
       ),
@@ -97,7 +101,7 @@ export function PatientDetailPage() {
 
   return (
     <div className="lg:flex lg:h-[calc(100dvh-70px)] lg:flex-col">
-      <PageHeader title={p.name} back={{ to: '/patients', label: 'Patients' }} />
+      <PageHeader title={p.name} back={backTarget(from, { to: '/patients', label: 'All patients' })} />
 
       {/* Who they are */}
       <div className="card mb-3.5 flex shrink-0 flex-wrap items-center gap-4 p-4">
@@ -110,12 +114,12 @@ export function PatientDetailPage() {
           {(pendingAppointments > 0 || openFollowUps > 0) && (
             <span className="mt-1 flex flex-wrap gap-2 text-[12.5px] font-bold">
               {pendingAppointments > 0 && (
-                <Link to="/appointments" className="pill warn hover:underline">
+                <Link to="/appointments" search={{ patient: p.id, from: `patient-${p.id}` }} className="pill warn hover:underline" title="Show only this patient's pending appointments">
                   {pendingAppointments} appointment{pendingAppointments === 1 ? '' : 's'} pending →
                 </Link>
               )}
               {openFollowUps > 0 && (
-                <Link to="/follow-ups" className="pill warn hover:underline">
+                <Link to="/follow-ups" search={{ patient: p.id, from: `patient-${p.id}` }} className="pill warn hover:underline" title="Show only this patient's follow-ups">
                   {openFollowUps} follow-up{openFollowUps === 1 ? '' : 's'} to do →
                 </Link>
               )}

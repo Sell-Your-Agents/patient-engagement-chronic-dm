@@ -1,4 +1,6 @@
+import { Link } from '@tanstack/react-router'
 import { INTENT_LABELS, LANGUAGE_LABELS } from '../hooks/useCalls'
+import type { From } from '../lib/backNav'
 
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -64,7 +66,7 @@ export function LanguageBadge({ language }: { language: string | null }) {
 
 const BOOKING_LABELS: Record<string, { label: string; cls: string }> = {
   confirmed: { label: 'Confirmed by Staff', cls: 'ok' },
-  pending: { label: 'Pending confirmation', cls: 'warn' },
+  pending: { label: 'Pending appointment', cls: 'warn' },
   not_applicable: { label: 'No booking', cls: 'mute' },
 }
 
@@ -74,7 +76,25 @@ export function BookingBadge({ status }: { status: string | null }) {
   return <span className={`pill ${b.cls}`}>{b.label}</span>
 }
 
-/** Appointment status, with "pending" spelled out as the document's "Pending confirmation". */
+/** The booking badge of a call; when the call made an appointment, it opens that appointment on the Appointments page. */
+export function BookingLink({ status, callId, from = 'calls' }: { status: string | null; callId: number; from?: From }) {
+  if (status !== 'pending' && status !== 'confirmed') return <BookingBadge status={status} />
+  return (
+    <Link
+      to="/appointments"
+      search={{ call: callId, from }}
+      className="booking-link"
+      title="Open this appointment on the Appointments page"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <span className={`pill ${BOOKING_LABELS[status]!.cls}`}>
+        {BOOKING_LABELS[status]!.label} <span aria-hidden>→</span>
+      </span>
+    </Link>
+  )
+}
+
+/** Appointment status in the words staff use ("Pending confirmation" until staff confirm it). */
 export function AppointmentStatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; cls: string }> = {
     pending: { label: 'Pending confirmation', cls: 'warn' },
@@ -137,6 +157,30 @@ export function TranscriptView({ transcript, agentName }: { transcript: string; 
         </div>
       ))}
     </div>
+  )
+}
+
+/** Which Appointments list an appointment belongs to. Used by the Appointments chips and the doctor cards, so counts match. */
+export type AppointmentList = 'pending' | 'cancel' | 'upcoming' | 'past' | 'cancelled'
+export function appointmentList(a: { status: string; start_at: string | null }, today = localISODate(new Date())): AppointmentList {
+  if (a.status === 'pending') return 'pending'
+  if (a.status === 'cancel_requested') return 'cancel'
+  if (a.status === 'cancelled') return 'cancelled'
+  if (a.status === 'completed') return 'past'
+  // Confirmed: upcoming until its day has passed (then it waits in Past to be marked Visited)
+  return a.start_at && a.start_at.slice(0, 10) < today ? 'past' : 'upcoming'
+}
+
+/** "Showing only: Anita Grewal  ✕ Clear" above a list filtered to one patient. */
+export function PatientFilterChip({ name, onClear }: { name: string; onClear: () => void }) {
+  return (
+    <span className="patient-filter">
+      <span className="text-ink-muted">Showing only</span>
+      <b>{name}</b>
+      <button type="button" onClick={onClear} title="Show everyone again">
+        ✕ Clear
+      </button>
+    </span>
   )
 }
 

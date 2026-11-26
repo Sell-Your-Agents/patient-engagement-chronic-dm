@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.models.call_log import CallLog
 from app.models.patient import Patient
-from app.prompts.common_prompts import CLINIC_INFO, CORE_RULES, RECORDING_LINE
+from app.prompts.common_prompts import CLINIC_INFO, CORE_RULES, RECORDING_LINES
 from app.services.scheduling.clinic_scheduling import clinic_now
 
 logger = logging.getLogger(__name__)
@@ -96,8 +96,9 @@ def is_recorded(call: CallLog) -> bool:
     return _recording.get(call.call_sid or "", settings.call_recording_enabled)
 
 
-def recording_line(call: CallLog) -> str:
-    return RECORDING_LINE if is_recorded(call) else ""
+def recording_line(call: CallLog, language: str = "en") -> str:
+    """The recording notice for the opening line (in the greeting's language), or "" when not recorded."""
+    return RECORDING_LINES.get(language, RECORDING_LINES["en"]) if is_recorded(call) else ""
 
 
 # ---------- Shared prompt sections ----------

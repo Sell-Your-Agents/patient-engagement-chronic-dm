@@ -54,15 +54,37 @@ async def close_stale_calls(db: AsyncSession, *, browser_only_any_age: bool = Fa
     return len(calls)
 
 
-async def close_call_now(db: AsyncSession, call_id: Optional[int] = None, call_sid: Optional[str] = None) -> None:
-    """Last-resort close for one call when finalizing failed or the call never got going."""
+async def close_call_now(
+    db: AsyncSession,
+    call_id: Optional[int] = None,
+    call_sid: Optional[str] = None,
+    duration_seconds: Optional[int] = None,
+    recording: bool = False,
+) -> None:
+    """Last-resort close for one call when finalizing failed or the call never got going.
+
+    Uses its own fresh database session: the call's session may be broken by the error that got us here
+    (a failed save leaves it unusable), and reusing it once left a finished call showing as live.
+    """
+    from app.database import AsyncSessionLocal
+
     try:
         await db.rollback()
-        query = select(CallLog).where(CallLog.id == call_id) if call_id else select(CallLog).where(CallLog.call_sid == call_sid)
-        call = (await db.execute(query)).scalar_one_or_none()
-        if call and call.status in LIVE_STATUSES:
-            _close(call, datetime.utcnow())
-            await db.commit()
+    except Exception:
+        pass
+    try:
+        async with AsyncSessionLocal() as fresh:
+            query = select(CallLog).where(CallLog.id == call_id) if call_id else select(CallLog).where(CallLog.call_sid == call_sid)
+            call = (await fresh.execute(query)).scalar_one_or_none()
+            if not call:
+                return
+            if call.status in LIVE_STATUSES:
+                _close(call, datetime.utcnow())
+                if duration_seconds is not None:
+                    call.duration_seconds = duration_seconds
+            if recording and not call.recording_url:
+                call.recording_url = f"/api/calls/{call.id}/recording"
+            await fresh.commit()
             logger.info(f"Call #{call.id} closed as {call.status} after an incomplete finalize")
     except Exception as exc:
         logger.error(f"Could not close call {call_id or call_sid}: {exc}", exc_info=True)

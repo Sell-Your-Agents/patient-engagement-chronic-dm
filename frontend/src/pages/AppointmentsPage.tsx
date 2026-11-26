@@ -1,12 +1,10 @@
-import { useEffect, useState } from 'react'
-import { Link, useSearch } from '@tanstack/react-router'
+import { Fragment, useEffect, useState } from 'react'
+import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { useAppointments, useUpdateAppointment, useCreateAppointment, type Appointment } from '../hooks/useAppointments'
-import { useDoctors, useClinicInfo, type Doctor } from '../hooks/useClinic'
+import { useDoctors, type Doctor } from '../hooks/useClinic'
 import {
   PageHeader,
-  Kpi,
   Modal,
-  Avatar,
   EmptyState,
   ErrorState,
   TableSkeleton,
@@ -17,13 +15,15 @@ import {
   sentenceCase,
   plainTime,
 } from '../components/ui'
-import { AppointmentStatusBadge, WEEKDAYS, hoursLabel, localISODate, mondayIndex } from '../components/clinic'
+import { AppointmentStatusBadge, PatientFilterChip, appointmentList, WEEKDAYS, hoursLabel, localISODate, mondayIndex } from '../components/clinic'
 import { toast, errorText } from '../components/toast'
 import { Icon } from '../components/Icon'
-import { MoreText } from '../components/MoreText'
-import { RowMenu, type RowMenuItem } from '../components/RowMenu'
+import { savedAndHeard } from '../hooks/useFollowUps'
+import { backTarget, useListState, useOnChange, useScrollMemory, type From } from '../lib/backNav'
+import { LANGUAGE_LABELS } from '../hooks/useCalls'
 
-type Tab = 'pending' | 'cancel' | 'confirmed' | 'all'
+type Tab = 'all' | 'pending' | 'cancel' | 'upcoming' | 'past' | 'cancelled'
+const PAGE_SIZE = 15
 
 /** "Mon – Sat" for a run of days, otherwise "Mon, Wed, Fri". */
 function daysLabel(days: number[]) {
@@ -58,34 +58,126 @@ function visitLabel(start: string) {
   return `${day}, ${time}`
 }
 
+const tabOf = (a: Appointment, today: string): Exclude<Tab, 'all'> => appointmentList(a, today)
+
+const CHIPS: { key: Tab; title: string; sub: string; tone: string }[] = [
+  { key: 'pending', title: 'Pending', sub: 'Booked by the AI agent', tone: 't-warn' },
+  { key: 'upcoming', title: 'Upcoming', sub: 'Confirmed visits', tone: 't-ok' },
+  { key: 'past', title: 'Past', sub: 'Visited appointments', tone: 't-info' },
+  { key: 'cancelled', title: 'Cancelled', sub: 'No longer coming', tone: 't-mute' },
+  { key: 'all', title: 'All', sub: 'Every appointment', tone: 't-acc' },
+]
+
+const EMPTY_TEXT: Record<Tab, string> = {
+  all: 'No appointments yet.',
+  pending: 'No pending appointments. New requests from calls appear here.',
+  cancel: 'No cancel requests. When a patient asks to cancel by phone, it appears here.',
+  upcoming: 'No upcoming confirmed visits.',
+  past: 'No past appointments yet.',
+  cancelled: 'No cancelled appointments.',
+}
+
 export function AppointmentsPage() {
-  const [tab, setTab] = useState<Tab>('pending')
-  const search = useSearch({ strict: false }) as { doctor?: number }
-  const [doctorId, setDoctorId] = useState(search.doctor ? String(search.doctor) : '')
-  const [page, setPage] = useState(1)
+  const search = useSearch({ strict: false }) as { doctor?: number; patient?: number; open?: number; call?: number; from?: From }
+  const navigate = useNavigate()
+  // Opened from another page (Call Records, Follow-ups, Doctors, a patient): show a button back there.
+  // Kept in state because the URL is cleaned after a linked appointment is opened.
+  const [cameFrom] = useState(search.from)
+  // Tab, doctor, search, page and the open notes: kept while a call is open, so coming back shows the list as it was
+  const { state: view, set, restored } = useListState('/appointments', {
+    tab: 'pending' as Tab,
+    doctorId: search.doctor ? String(search.doctor) : '',
+    // One patient only (from a patient's page); Clear or a refresh shows everyone again
+    patientId: (search.patient || null) as number | null,
+    q: '',
+    page: 1,
+    expanded: null as number | null,
+  })
+  const { tab, doctorId, patientId, q, page, expanded } = view
+  const setPatientId = (v: number | null) => set('patientId', v)
+  const setTab = (v: Tab) => set('tab', v)
+  const setDoctorId = (v: string) => set('doctorId', v)
+  const setQ = (v: string) => set('q', v)
+  const setPage = (v: number) => set('page', v)
+  const setExpanded = (v: number | null) => set('expanded', v)
+  // A doctor link wins over a remembered doctor
+  useEffect(() => {
+    if (search.doctor) setDoctorId(String(search.doctor))
+  }, [search.doctor]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A patient link (patient page) shows that patient's pending appointments
+  useEffect(() => {
+    if (!search.patient) return
+    setPatientId(search.patient)
+    setDoctorId('')
+    setQ('')
+    setTab('pending')
+  }, [search.patient]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A doctor link (Doctors page) filters once; the URL is cleaned so a refresh shows every doctor again
+  useEffect(() => {
+    if ((search.doctor || search.patient || search.from) && !search.open && !search.call) navigate({ to: '/appointments', search: {}, replace: true })
+  }, [search.doctor, search.patient]) // eslint-disable-line react-hooks/exhaustive-deps
   const [confirming, setConfirming] = useState<Appointment | null>(null)
   const [rescheduling, setRescheduling] = useState<Appointment | null>(null)
   const [cancelling, setCancelling] = useState<Appointment | null>(null)
   const [creating, setCreating] = useState(false)
+  // A row opened from a link (Call Records, notifications): briefly highlighted
+  const [flash, setFlash] = useState<number | null>(null)
 
   const { data: all, isLoading, error, refetch } = useAppointments()
   const { data: doctors } = useDoctors()
-  const { data: info } = useClinicInfo()
   const update = useUpdateAppointment()
 
-  useEffect(() => setPage(1), [tab, doctorId])
+  // Back to page 1 when the list changes (not when it is first shown, so a restored page stays)
+  useOnChange(`${tab}|${doctorId}|${patientId}|${q}`, () => setPage(1))
+  const patientName = patientId ? (all || []).filter((a) => a.patient_id === patientId).map((a) => a.patient_saved_name || a.patient_name)[0] || 'this patient' : ''
+  useScrollMemory('/appointments', restored && !search.open && !search.call, !!all)
 
-  const list = (all || []).filter((a) => !doctorId || String(a.doctor_id) === doctorId)
-  const pending = list.filter((a) => a.status === 'pending')
-  const cancelRequests = list.filter((a) => a.status === 'cancel_requested')
   const today = localISODate(new Date())
-  const confirmed = list
-    .filter((a) => a.status === 'confirmed' && a.start_at && a.start_at.slice(0, 10) >= today)
-    .sort((a, b) => (a.start_at! < b.start_at! ? -1 : 1))
-  const shown = tab === 'pending' ? pending : tab === 'cancel' ? cancelRequests : tab === 'confirmed' ? confirmed : list
+  const term = q.trim().toLowerCase()
+  const digits = term.replace(/\D/g, '')
+  const list = (all || []).filter((a) => {
+    if (patientId && a.patient_id !== patientId) return false
+    if (doctorId && String(a.doctor_id) !== doctorId) return false
+    if (!term) return true
+    const names = [a.patient_name, a.patient_saved_name, a.call_ref].filter(Boolean).join(' ').toLowerCase()
+    return names.includes(term) || (digits.length >= 3 && (a.phone_number || '').replace(/\D/g, '').includes(digits))
+  })
+  const counts: Record<Tab, number> = { all: list.length, pending: 0, cancel: 0, upcoming: 0, past: 0, cancelled: 0 }
+  for (const a of list) counts[tabOf(a, today)]++
+  const shown = (tab === 'all' ? list : list.filter((a) => tabOf(a, today) === tab)).sort((a, b) => {
+    // Upcoming: soonest first; Past: most recent first; otherwise newest request first (as the server sends them)
+    if (tab === 'upcoming') return (a.start_at || '') < (b.start_at || '') ? -1 : 1
+    if (tab === 'past') return (a.start_at || '') < (b.start_at || '') ? 1 : -1
+    return 0
+  })
   const doctorById = new Map((doctors || []).map((d) => [d.id, d]))
   const keepStatus = (a: Appointment) => (a.confirmed_at ? 'confirmed' : 'pending')
-  const paged = paginate(shown, page, setPage, 15)
+  const paged = paginate(shown, page, setPage, PAGE_SIZE)
+
+  // Opened from a link: ?open=<appointment id> or ?call=<call id>. Show it in its own list, open its notes, scroll to it.
+  const target = search.open || search.call
+  useEffect(() => {
+    if (!target || !all) return
+    const a = search.open ? all.find((x) => x.id === search.open) : all.find((x) => x.call_log_id === search.call)
+    navigate({ to: '/appointments', search: {}, replace: true })
+    if (!a) {
+      toast.info('No appointment found for that call', 'It may have been removed.')
+      return
+    }
+    // Cancel requests have no chip here (staff handle them from Follow-ups), so they open under All
+    const own_tab = tabOf(a, localISODate(new Date()))
+    setTab(own_tab === 'cancel' ? 'all' : own_tab)
+    setDoctorId('')
+    setPatientId(null)
+    setQ('')
+    const own = own_tab === 'cancel' ? all : all.filter((x) => tabOf(x, localISODate(new Date())) === own_tab)
+    // After the list has switched (which resets to page 1), go to the page this appointment is on
+    window.setTimeout(() => setPage(Math.floor(Math.max(0, own.findIndex((x) => x.id === a.id)) / PAGE_SIZE) + 1), 0)
+    setExpanded(a.id)
+    setFlash(a.id)
+    window.setTimeout(() => document.getElementById(`appt-${a.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150)
+    window.setTimeout(() => setFlash(null), 2400)
+  }, [target, all]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const done = (msg: string, who: string) => ({
     onSuccess: () => toast.success(msg, who),
@@ -96,23 +188,15 @@ export function AppointmentsPage() {
     <div>
       <PageHeader
         title="Appointments"
-        subtitle={
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="tabs">
-              {(
-                [
-                  ['pending', 'Pending confirmation', pending.length],
-                  ['cancel', 'Cancel requests', cancelRequests.length],
-                  ['confirmed', 'Confirmed by Staff', confirmed.length],
-                  ['all', 'All', list.length],
-                ] as const
-              ).map(([k, l, n]) => (
-                <button key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>
-                  {l} <span className="c">{n}</span>
-                </button>
-              ))}
-            </div>
-            <select className="field !h-[34px] !w-auto font-bold" value={doctorId} onChange={(e) => setDoctorId(e.target.value)} aria-label="Doctor">
+        back={cameFrom ? backTarget(cameFrom, { to: '/appointments', label: 'Appointments' }) : undefined}
+        // With a back button there is no room for the instruction line on one row, so it is left out then
+        subtitle={cameFrom ? undefined : 'Call the patient, agree the day and time, then press Confirm. Click a row to read the notes from the call.'}
+        actions={
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <select
+              className={`field doctor-pick !h-[38px] !w-auto max-w-[220px] ${doctorId ? 'on' : ''}`}
+              title={doctorId ? 'Showing only this doctor. Choose All doctors to see everyone.' : 'Show one doctor only'}
+              value={doctorId} onChange={(e) => setDoctorId(e.target.value)} aria-label="Doctor">
               <option value="">All doctors</option>
               {doctors?.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -120,27 +204,33 @@ export function AppointmentsPage() {
                 </option>
               ))}
             </select>
+            <input className="field !h-[38px] !w-52" placeholder="Name, phone or SS-1125" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search appointments" />
+            <button className="btn p" onClick={() => setCreating(true)}>
+              <Icon name="plus" className="h-4 w-4" /> New appointment
+            </button>
           </div>
-        }
-        actions={
-          <button className="btn p" onClick={() => setCreating(true)}>
-            <Icon name="plus" className="h-4 w-4" /> New appointment
-          </button>
         }
       />
 
-      {info?.appointment_integration === 'none' && (
-        <div className="note mb-3.5 text-[13px]">
-          No clinic appointment system is connected, so the agent only records requests. Call the patient, agree the day and rough time (within the
-          doctor's working hours), then press <b>Confirm</b>. When a patient asks to cancel by phone, it shows under <b>Cancel requests</b> until you
-          confirm it.
+      {patientId && (
+        <div className="mb-2.5">
+          <PatientFilterChip name={patientName} onClear={() => setPatientId(null)} />
         </div>
       )}
 
-      <div className="grid g3 mb-3.5">
-        <Kpi label="Pending confirmation" value={pending.length} hint="Requests the agent recorded" icon="clock" tone="warn" />
-        <Kpi label="Cancel requests" value={cancelRequests.length} hint="Patients asked to cancel; confirm them" icon="alert" tone="bad" />
-        <Kpi label="Confirmed by Staff" value={confirmed.length} hint="Upcoming visits" icon="checkCircle" tone="ok" />
+      {/* One row: every list as a coloured chip (its count; click to show that list) */}
+      <div className="mb-3.5">
+        <div className="glance glance-fill" role="tablist" aria-label="Appointment lists">
+          {CHIPS.map((c) => (
+            <button key={c.key} type="button" role="tab" aria-selected={tab === c.key} className={`chip-stat ${tab === c.key ? 'on' : ''}`} onClick={() => setTab(c.key)}>
+              <span className={`num ${c.tone}`}>{counts[c.key]}</span>
+              <span>
+                <b>{c.title}</b>
+                <small>{c.sub}</small>
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="card">
@@ -151,138 +241,103 @@ export function AppointmentsPage() {
             <ErrorState text="Could not load appointments" onRetry={() => refetch()} />
           </div>
         ) : shown.length === 0 ? (
-          <EmptyState
-            icon="calendar"
-            text={
-              tab === 'pending'
-                ? 'No requests waiting. New requests from calls appear here.'
-                : tab === 'cancel'
-                  ? 'No cancel requests. When a patient asks to cancel by phone, it appears here.'
-                  : 'No appointments here.'
-            }
-          />
+          <EmptyState icon="calendar" text={term || doctorId || patientId ? 'No appointments match.' : EMPTY_TEXT[tab]} />
         ) : (
           <div className="scroll">
-            {/* Fixed widths: every row is two short lines and the table always fits the page */}
-            <table className="t table-fixed w-full">
+            {/* Each row is short; click it to open the appointment notes underneath */}
+            <table className="t table-fixed w-full min-w-[880px]">
               <colgroup>
-                <col style={{ width: '16%' }} />
+                <col style={{ width: '19%' }} />
+                <col style={{ width: '19%' }} />
+                <col style={{ width: '22%' }} />
                 <col style={{ width: '14%' }} />
-                <col style={{ width: '17%' }} />
-                <col style={{ width: '13%' }} />
-                <col style={{ width: '11%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '17%' }} />
+                <col style={{ width: '26%' }} />
               </colgroup>
               <thead>
                 <tr>
                   <th>Patient</th>
-                  <th>Doctor</th>
-                  <th>Visit (day, rough time)</th>
-                  <th>Reason</th>
-                  <th>Requested</th>
+                  <th>Visit</th>
+                  <th>Purpose of visit</th>
                   <th>Status</th>
-                  <th className="text-right">Actions</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {paged.pageItems.map((a) => {
-                  const open = a.status === 'pending' || a.status === 'confirmed'
-                  const doctor = a.doctor_id ? a.doctor_name : a.doctor_requested || 'Not chosen'
+                  const doctor = a.doctor_id ? a.doctor_name : a.doctor_requested || 'Doctor not chosen'
                   const doc = a.doctor_id ? doctorById.get(a.doctor_id) : undefined
-                  const doctorSub = a.doctor_id ? a.doctor_specialty : 'as asked by caller'
-                  const more: RowMenuItem[] = []
-                  if (a.status === 'cancel_requested') {
-                    more.push({
-                      label: 'Keep appointment (patient changed mind)',
-                      onClick: () => update.mutate({ id: a.id, status: keepStatus(a) }, done('Appointment kept', a.patient_name)),
-                    })
-                    more.push({ label: 'Reschedule instead of cancelling', onClick: () => setRescheduling(a) })
-                  }
-                  if (open) more.push({ label: 'Cancel appointment', danger: true, onClick: () => setCancelling(a) })
+                  const isOpen = expanded === a.id
+                  const toggle = () => setExpanded(isOpen ? null : a.id)
+                  const { name, said } = savedAndHeard(a)
+                  const label = name || 'Patient'
                   return (
-                    <tr key={a.id}>
-                      <td>
-                        <div className="who min-w-0">
-                          <Avatar name={a.patient_name} size={28} />
-                          <div className="min-w-0">
-                            <b className="block truncate" title={a.patient_name}>
-                              {a.patient_id ? (
-                                <Link to="/patients/$id" params={{ id: String(a.patient_id) }} className="text-ink hover:text-brand">
-                                  {a.patient_name}
-                                </Link>
-                              ) : (
-                                a.patient_name
-                              )}
-                            </b>
-                            <small className="block whitespace-nowrap">{a.phone_number || '—'}</small>
-                          </div>
-                        </div>
-                      </td>
-                      <td title={[doctor, doctorSub].filter(Boolean).join(' · ')}>
-                        <span className={`block truncate ${a.doctor_id ? '' : 'text-ink-soft'}`}>{doctor}</span>
-                        {doctorSub && <small className="block truncate text-ink-muted">{doctorSub}</small>}
-                      </td>
-                      <td
-                        title={[
-                          a.preferred_time && `Asked for: ${plainTime(a.preferred_time)}`,
-                          doc && `Doctor available ${availabilityLabel(doc)}`,
-                          plainTime(a.change_note),
-                        ]
-                          .filter(Boolean)
-                          .join('\n')}
+                    <Fragment key={a.id}>
+                      <tr
+                        id={`appt-${a.id}`}
+                        className={`appt-row cursor-pointer ${isOpen ? 'appt-open' : ''} ${flash === a.id ? 'row-flash' : ''}`}
+                        onClick={toggle}
+                        aria-expanded={isOpen}
+                        title={isOpen ? 'Click to close the notes' : 'Click to open the appointment notes'}
                       >
-                        {a.start_at ? <b className="block truncate">{visitLabel(a.start_at)}</b> : <span className="block truncate text-ink-muted">Day not set yet</span>}
-                        {a.change_note ? (
-                          <small className={`block truncate font-bold ${a.status === 'cancel_requested' ? 'text-bad' : 'text-warn'}`}>{plainTime(a.change_note)}</small>
-                        ) : a.preferred_time && !a.start_at ? (
-                          <small className="block truncate text-ink-muted">Asked for: {plainTime(a.preferred_time)}</small>
-                        ) : doc ? (
-                          <small className="block truncate text-ink-muted">Doctor in {hoursLabel(doc.start_time, doc.end_time)}</small>
-                        ) : null}
-                      </td>
-                      <td className="text-[13px] text-ink-soft">
-                        <MoreText text={sentenceCase(a.reason)} limit={70} />
-                      </td>
-                      <td className="text-[13px]">
-                        <span className="block truncate">{friendlyTime(a.created_at, true)}</span>
-                        <small className="block truncate text-ink-muted">
-                          {a.source === 'agent' ? (a.call_ref ? `AI agent · ${a.call_ref}` : 'AI agent') : 'Clinic staff'}
-                        </small>
-                      </td>
-                      <td className="overflow-hidden">
-                        <AppointmentStatusBadge status={a.status} />
-                      </td>
-                      <td>
-                        <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
-                          {a.status === 'pending' && (
-                            <button className="btn sm p" onClick={() => setConfirming(a)}>
-                              Confirm
-                            </button>
-                          )}
-                          {open && (
-                            <button className="btn sm" onClick={() => setRescheduling(a)} title="Change the doctor, day or time">
-                              Reschedule
-                            </button>
-                          )}
-                          {a.status === 'cancel_requested' && (
-                            <button className="btn sm d" onClick={() => setCancelling(a)}>
-                              Confirm cancel
-                            </button>
-                          )}
-                          {a.status === 'confirmed' && (
-                            <button
-                              className="btn sm"
-                              disabled={update.isPending}
-                              onClick={() => update.mutate({ id: a.id, status: 'completed' }, done('Marked as completed', a.patient_name))}
+                        <td>
+                          <b className={`person-name ${label.length > 22 ? 'long' : ''}`}>{label}</b>
+                          {said && <span className="said-as">Name said on the call: {said}</span>}
+                          <small className="block whitespace-nowrap text-ink-soft">{a.phone_number || 'No number'}</small>
+                          {a.call_log_id && (
+                            <Link
+                              to="/calls/$id"
+                              params={{ id: String(a.call_log_id) }}
+                              search={{ from: 'appointments' }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="call-chip mt-1.5"
+                              title="Open this call: transcript and recording"
                             >
-                              Done
-                            </button>
+                              <Icon name="phone" className="h-3 w-3" />
+                              {a.call_ref}
+                              {a.call_at ? ` · ${friendlyTime(a.call_at, true)}` : ''}
+                            </Link>
                           )}
-                          <RowMenu items={more} />
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                        <td>
+                          {a.start_at ? <b className="block">{visitLabel(a.start_at)}</b> : <span className="block text-ink-muted">Day not set yet</span>}
+                          <small className={`block ${a.doctor_id ? 'text-ink-soft' : 'text-ink-muted'}`}>
+                            {doctor}
+                            {a.doctor_id && a.doctor_specialty ? ` · ${a.doctor_specialty}` : ''}
+                          </small>
+                        </td>
+                        <td>
+                          <span className="clamp2 text-[13.5px]">{a.reason ? sentenceCase(a.reason) : <span className="text-ink-muted">No reason given</span>}</span>
+                          {a.change_note && (
+                            <small className={`block break-words font-bold ${a.status === 'cancel_requested' ? 'text-bad' : 'text-warn'}`}>{plainTime(a.change_note)}</small>
+                          )}
+                          <span className="mt-1 inline-block text-[12px] font-bold text-brand">{isOpen ? '▴ Hide notes' : '▾ Appointment notes'}</span>
+                        </td>
+                        <td className="overflow-hidden">
+                          <AppointmentStatusBadge status={a.status} />
+                          <small className="mt-1 block text-ink-muted">
+                            {a.source === 'agent' ? 'AI agent' : 'Clinic staff'} · {friendlyTime(a.created_at, true)}
+                          </small>
+                        </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <RowActions
+                            a={a}
+                            onConfirm={setConfirming}
+                            onReschedule={setRescheduling}
+                            onCancel={setCancelling}
+                            onVisited={() => update.mutate({ id: a.id, status: 'completed' }, done('Marked as visited', label))}
+                            onKeep={() => update.mutate({ id: a.id, status: keepStatus(a) }, done('Appointment kept', label))}
+                            busy={update.isPending}
+                          />
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr className="appt-notes-row">
+                          <td colSpan={5}>
+                            <AppointmentNotes a={a} doctorHours={doc ? availabilityLabel(doc) : null} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   )
                 })}
               </tbody>
@@ -300,7 +355,7 @@ export function AppointmentsPage() {
         open={!!cancelling}
         onClose={() => setCancelling(null)}
         title={cancelling?.status === 'cancel_requested' ? 'Confirm the cancellation?' : 'Cancel this appointment?'}
-        subtitle={cancelling ? `${cancelling.patient_name} · ${cancelling.doctor_name}${cancelling.start_at ? ` · ${visitLabel(cancelling.start_at)}` : ''}` : ''}
+        subtitle={cancelling ? `${savedAndHeard(cancelling).name || 'Patient'} · ${cancelling.doctor_name}${cancelling.start_at ? ` · ${visitLabel(cancelling.start_at)}` : ''}` : ''}
       >
         <p className="text-ink-soft">
           {cancelling?.status === 'cancel_requested'
@@ -316,13 +371,117 @@ export function AppointmentsPage() {
             disabled={update.isPending}
             onClick={() => {
               if (!cancelling) return
-              update.mutate({ id: cancelling.id, status: 'cancelled' }, { ...done('Appointment cancelled', cancelling.patient_name), onSettled: () => setCancelling(null) })
+              update.mutate(
+                { id: cancelling.id, status: 'cancelled' },
+                { ...done('Appointment cancelled', savedAndHeard(cancelling).name || ''), onSettled: () => setCancelling(null) },
+              )
             }}
           >
             Cancel appointment
           </button>
         </div>
       </Modal>
+    </div>
+  )
+}
+
+/** The buttons for one appointment, side by side: no hidden menu. */
+function RowActions({ a, onConfirm, onReschedule, onCancel, onVisited, onKeep, busy }: {
+  a: Appointment
+  onConfirm: (a: Appointment) => void
+  onReschedule: (a: Appointment) => void
+  onCancel: (a: Appointment) => void
+  onVisited: () => void
+  onKeep: () => void
+  busy: boolean
+}) {
+  const active = a.status === 'pending' || a.status === 'confirmed'
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {a.status === 'pending' && (
+        <button className="btn sm p" onClick={() => onConfirm(a)} title="Mark as confirmed after you have spoken to the patient">
+          <Icon name="check" className="h-3.5 w-3.5" /> Confirm
+        </button>
+      )}
+      {a.status === 'cancel_requested' && (
+        <>
+          <button className="btn sm dfill" onClick={() => onCancel(a)} title="The patient asked to cancel on the phone. Confirm it and let them know">
+            Confirm cancel
+          </button>
+          <button className="btn sm" disabled={busy} onClick={onKeep} title="The patient changed their mind: keep the appointment">
+            Keep
+          </button>
+        </>
+      )}
+      {active && (
+        <button className="btn sm" onClick={() => onReschedule(a)} title="Change the doctor, day or time">
+          Reschedule
+        </button>
+      )}
+      {a.status === 'confirmed' && (
+        <button className="btn sm okfill" disabled={busy} onClick={onVisited} title="The patient came for the visit">
+          Visited
+        </button>
+      )}
+      {active && (
+        <button className="btn sm d" onClick={() => onCancel(a)} title="Cancel this appointment and let the patient know">
+          Cancel
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** What opens under a row: the details with the call button beside them, then the full story of the call across the whole width. */
+function AppointmentNotes({ a, doctorHours }: { a: Appointment; doctorHours: string | null }) {
+  const { name, said } = savedAndHeard(a)
+  const facts: [string, string | null | undefined][] = [
+    ['Patient', [name, a.phone_number].filter(Boolean).join(' · ')],
+    ['Name said on the call', said],
+    ['Doctor', a.doctor_id ? `${a.doctor_name}${a.doctor_specialty ? ` · ${a.doctor_specialty}` : ''}` : a.doctor_requested || 'Not chosen yet'],
+    ['Doctor available', doctorHours],
+    ['Visit', a.start_at ? visitLabel(a.start_at) : 'Day not set yet'],
+    ['Asked for', plainTime(a.preferred_time)],
+    ['Reason', a.reason ? sentenceCase(a.reason) : null],
+    ['Language', a.call_language ? LANGUAGE_LABELS[a.call_language] || a.call_language : null],
+    ['Last change', plainTime(a.change_note)],
+    ['Staff notes', a.staff_notes],
+  ]
+
+  return (
+    <div className="appt-notes">
+      <div className="appt-notes-top">
+        <div className="min-w-0 p-4">
+          <span className="lbl mb-2 block">Appointment notes</span>
+          <div className="grid grid-cols-[160px_minmax(0,1fr)] gap-x-3 gap-y-1 text-[13.5px] leading-snug">
+            {facts
+              .filter(([, v]) => v)
+              .map(([k, v]) => (
+                <Fragment key={k}>
+                  <span className="text-ink-muted">{k}</span>
+                  <b className="min-w-0 break-words">{v}</b>
+                </Fragment>
+              ))}
+          </div>
+        </div>
+        <div className="appt-notes-aside">
+          <span className="lbl">The call</span>
+          {a.call_log_id ? (
+            <Link to="/calls/$id" params={{ id: String(a.call_log_id) }} search={{ from: 'appointments' }} className="call-btn" title="Open the call: full transcript and recording">
+              <b>Open call {a.call_ref} →</b>
+              <small>{a.call_at ? `${friendlyTime(a.call_at, true)} · ` : ''}full transcript and recording</small>
+            </Link>
+          ) : (
+            <small className="text-ink-muted">{a.source === 'agent' ? 'No call is linked to this request.' : 'Booked by clinic staff, not on a call.'}</small>
+          )}
+        </div>
+      </div>
+      {a.source === 'agent' && (
+        <div className="appt-story">
+          <span className="lbl mb-1.5 block">Why they called and what they said</span>
+          <p>{a.call_summary || (a.call_log_id ? 'The call summary appears here a few seconds after the call ends.' : 'No call is linked to this request.')}</p>
+        </div>
+      )}
     </div>
   )
 }
@@ -402,7 +561,7 @@ function ConfirmModal({ appointment: a, doctors, mode, onClose }: { appointment:
       { id: a.id, doctor_id: doctorId!, start_at: visit, staff_notes: notes, ...(status ? { status } : {}) },
       {
         onSuccess: () => {
-          toast.success(rescheduling ? 'Appointment rescheduled' : 'Appointment confirmed', a.patient_name)
+          toast.success(rescheduling ? 'Appointment rescheduled' : 'Appointment confirmed', savedAndHeard(a).name || '')
           onClose()
         },
         onError: (e) => setErr(errorText(e, 'Could not save. Check the day and time are within the doctor\'s working hours.')),
@@ -411,7 +570,7 @@ function ConfirmModal({ appointment: a, doctors, mode, onClose }: { appointment:
   }
 
   return (
-    <Modal open onClose={onClose} title={rescheduling ? 'Reschedule appointment' : 'Confirm appointment'} subtitle={`${a.patient_name} · ${a.phone_number || 'no number'}`}>
+    <Modal open onClose={onClose} title={rescheduling ? 'Reschedule appointment' : 'Confirm appointment'} subtitle={`${savedAndHeard(a).name || 'Patient'} · ${a.phone_number || 'no number'}`}>
       <div className="space-y-3.5">
         <div className="kv !grid-cols-2 text-[13px]">
           <div>

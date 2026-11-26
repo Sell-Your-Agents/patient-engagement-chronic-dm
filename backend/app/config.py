@@ -49,9 +49,11 @@ class Settings(BaseSettings):
     silence_hangup_seconds: int = 8
     max_call_minutes: int = 15
 
-    # Record phone calls. When on, the agent's opening line says so.
-    # Browser test calls choose for themselves on the "Call the Agent" page.
+    # Record phone calls on our own server (services/voice/call_recorder.py). When on, the agent's
+    # opening line says so. Browser test calls choose for themselves on the "Call the Agent" page.
     call_recording_enabled: bool = False
+    # Folder for the recordings (one WAV per call, about 1 MB per minute). Relative = inside backend/.
+    recordings_dir: str = "recordings"
 
     # AI services
     anthropic_api_key: str = ""
@@ -71,6 +73,9 @@ class Settings(BaseSettings):
     # Audio format Plivo sends back (Twilio media streams need 8 kHz mu-law)
     plivo_tts_sample_rate: int = 8000
     plivo_tts_encoding: str = "pcm_mulaw"
+    # Speaking speed, 1.0 = normal: English a little faster, Telugu / Hindi a little slower for clarity
+    plivo_tts_pace_en: float = 1.1
+    plivo_tts_pace: float = 0.9
 
     @property
     def plivo_tts_ws_url(self) -> str:

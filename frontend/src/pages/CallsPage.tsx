@@ -1,16 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { useCallPage, useLiveCalls, callerName, INTENT_LABELS, LANGUAGE_LABELS, type Call, type CallSearch } from '../hooks/useCalls'
+import { useCallPage, callerName, INTENT_LABELS, LANGUAGE_LABELS, type Call, type CallSearch } from '../hooks/useCalls'
 import { PageHeader, EmptyState, ErrorState, TableSkeleton, Pagination, Avatar, friendlyTime, formatLength } from '../components/ui'
-import { IntentBadge, LanguageBadge, BookingBadge } from '../components/clinic'
-import { MoreText } from '../components/MoreText'
+import { IntentBadge, LanguageBadge, BookingLink } from '../components/clinic'
+import { Icon } from '../components/Icon'
+import { useListState, useOnChange, useScrollMemory } from '../lib/backNav'
 
 const PAGE_SIZE = 20
 const RANGES = [
+  { key: 'all', label: 'All time' },
   { key: 'today', label: 'Today' },
   { key: '7d', label: '7 days' },
   { key: '30d', label: '30 days' },
-  { key: 'all', label: 'All' },
 ] as const
 type Range = (typeof RANGES)[number]['key']
 
@@ -25,24 +26,47 @@ function rangeStart(range: Range): string | undefined {
 
 const RANGE_WORDS: Record<Range, string> = { today: 'today', '7d': 'in the last 7 days', '30d': 'in the last 30 days', all: '' }
 
+/** Finished calls only (a call shows up here once it has ended), newest first, paged on the server. */
 export function CallsPage() {
   const search = useSearch({ strict: false }) as { open?: number | string }
   const navigate = useNavigate()
   useEffect(() => {
-    if (search.open) navigate({ to: '/calls/$id', params: { id: String(search.open) }, replace: true })
+    if (search.open) navigate({ to: '/calls/$id', params: { id: String(search.open) }, search: { from: 'calls' }, replace: true })
   }, [search.open, navigate])
-  const [page, setPage] = useState(1)
-  const [q, setQ] = useState('')
-  const [term, setTerm] = useState('')
-  const [intent, setIntent] = useState('')
-  const [language, setLanguage] = useState('')
-  const [booking, setBooking] = useState('')
-  const [range, setRange] = useState<Range>('today')
+  // Filters, search and page: kept while a call is open, so "All call records" brings the list back as it was
+  const { state: view, set, restored } = useListState('/calls', { page: 1, q: '', intent: '', language: '', booking: '', range: 'all' as Range })
+  const { page, q, intent, language, booking, range } = view
+  const setPage = (n: number) => set('page', n)
+  const setQ = (v: string) => set('q', v)
+  const setIntent = (v: string) => set('intent', v)
+  const setLanguage = (v: string) => set('language', v)
+  const setBooking = (v: string) => set('booking', v)
+  const setRange = (v: Range) => set('range', v)
+  const [term, setTerm] = useState(q.trim())
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const filtersRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const t = window.setTimeout(() => setTerm(q.trim()), 300)
     return () => window.clearTimeout(t)
   }, [q])
+
+  // Close the filter panel on a click outside it, or Escape
+  useEffect(() => {
+    if (!filtersOpen) return
+    const onClick = (e: MouseEvent) => {
+      if (filtersRef.current && !filtersRef.current.contains(e.target as Node)) setFiltersOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFiltersOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [filtersOpen])
 
   const params: CallSearch = {
     page,
@@ -52,58 +76,90 @@ export function CallsPage() {
     language: language || undefined,
     booking_status: booking || undefined,
     date_from: rangeStart(range),
+    finished_only: true,
   }
   const filterKey = JSON.stringify({ ...params, page: 0 })
-  useEffect(() => setPage(1), [filterKey])
+  // A filter change goes back to page 1 (but not when the list is first shown, so a restored page stays)
+  useOnChange(filterKey, () => setPage(1))
 
   const { data, isLoading, error, refetch, isFetching } = useCallPage(params)
-  const { data: liveData } = useLiveCalls()
-  // When a live call starts or finishes, reload the list at once so the row switches between Watch live and View
-  const liveKey = (liveData || []).map((c) => c.id).join(',')
-  useEffect(() => {
-    refetch()
-  }, [liveKey, refetch])
-  // Live calls are pinned on top of the first page (whatever the filters); the rest is the history
-  const live = page === 1 ? liveData || [] : []
-  const liveIds = new Set(live.map((c) => c.id))
-  const calls = (data?.items || []).filter((c) => !liveIds.has(c.id) && c.status !== 'in-progress')
+  useScrollMemory('/calls', restored, !!data)
+  const calls = data?.items || []
   const total = data?.total || 0
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  // Filters inside the panel that are not at their default
+  const activeFilters = [range !== 'all', !!intent, !!language].filter(Boolean).length
+  const clearFilters = () => {
+    setRange('all')
+    setIntent('')
+    setLanguage('')
+  }
 
   return (
     <div>
       <PageHeader title="Call Records" />
 
       <div className="mb-3.5 flex flex-wrap items-center gap-2">
-        <div className="tabs">
-          {RANGES.map((r) => (
-            <button key={r.key} className={`tab ${range === r.key ? 'on' : ''}`} onClick={() => setRange(r.key)}>
-              {r.label}
-            </button>
-          ))}
-        </div>
-        <select className="field !h-[34px] !w-auto font-bold" value={intent} onChange={(e) => setIntent(e.target.value)} aria-label="Intent">
-          <option value="">All intents</option>
-          {Object.entries(INTENT_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
-        <select className="field !h-[34px] !w-auto font-bold" value={language} onChange={(e) => setLanguage(e.target.value)} aria-label="Language">
-          <option value="">All languages</option>
-          {Object.entries(LANGUAGE_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
         <select className="field !h-[34px] !w-auto font-bold" value={booking} onChange={(e) => setBooking(e.target.value)} aria-label="Booking">
           <option value="">Any booking</option>
-          <option value="pending">Pending confirmation</option>
+          <option value="pending">Pending appointment</option>
           <option value="confirmed">Confirmed by Staff</option>
           <option value="not_applicable">No booking</option>
         </select>
+
+        <div className="relative" ref={filtersRef}>
+          <button
+            className={`btn !h-[34px] ${activeFilters ? '!border-brand !text-brand' : ''}`}
+            onClick={() => setFiltersOpen((o) => !o)}
+            aria-expanded={filtersOpen}
+          >
+            <Icon name="filter" className="h-4 w-4" /> Filters
+            {activeFilters > 0 && <span className="filter-count">{activeFilters}</span>}
+          </button>
+          {filtersOpen && (
+            <div className="filter-panel" role="dialog" aria-label="Filters">
+              <span className="lbl mb-1.5 block">Date</span>
+              <div className="tabs mb-3.5 !grid w-full grid-cols-4">
+                {RANGES.map((r) => (
+                  <button key={r.key} className={`tab justify-center !px-1 text-center ${range === r.key ? 'on' : ''}`} onClick={() => setRange(r.key)}>
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+              <label className="mb-3.5 block">
+                <span className="lbl mb-1.5 block">Intent</span>
+                <select className="field" value={intent} onChange={(e) => setIntent(e.target.value)}>
+                  <option value="">All intents</option>
+                  {Object.entries(INTENT_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="mb-3.5 block">
+                <span className="lbl mb-1.5 block">Language</span>
+                <select className="field" value={language} onChange={(e) => setLanguage(e.target.value)}>
+                  <option value="">All languages</option>
+                  {Object.entries(LANGUAGE_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex justify-between gap-2 border-t border-line pt-3">
+                <button className="btn sm" disabled={!activeFilters} onClick={clearFilters}>
+                  Clear filters
+                </button>
+                <button className="btn sm p" onClick={() => setFiltersOpen(false)}>
+                  Done
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         <input className="field !h-[34px] ml-auto !w-64" placeholder="Name, phone or SS-1125" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search calls" />
       </div>
 
@@ -114,67 +170,51 @@ export function CallsPage() {
           <div className="p-4">
             <ErrorState text="Could not load call records" onRetry={() => refetch()} />
           </div>
-        ) : calls.length === 0 && live.length === 0 ? (
-          <EmptyState icon="phone" text={range === 'today' ? 'No calls yet today.' : 'No calls match these filters.'} />
+        ) : calls.length === 0 ? (
+          <EmptyState icon="phone" text={term || booking || activeFilters ? 'No calls match these filters.' : 'No calls yet.'} />
         ) : (
           <div className="scroll">
             {/* Fixed widths: every row is two short lines and the table always fits the page */}
             <table className="t table-fixed w-full">
               <colgroup>
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '16%' }} />
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '18%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '11%' }} />
                 <col style={{ width: '10%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '26%' }} />
+                <col style={{ width: '16%' }} />
+                <col style={{ width: '18%' }} />
+                <col style={{ width: '8%' }} />
               </colgroup>
               <thead>
                 <tr>
-                  <th>Call</th>
-                  <th>Caller</th>
+                  <th>Call ID</th>
+                  <th>Caller name</th>
                   <th>Language</th>
-                  <th>Intent</th>
-                  <th>Call outcome</th>
-                  <th>Booking</th>
+                  <th>Outcome</th>
+                  <th>Booking status</th>
                   <th>Next action</th>
-                  <th>Call log</th>
+                  <th>Details</th>
                 </tr>
               </thead>
               <tbody>
-                {live.map((c) => (
-                  <tr key={`live-${c.id}`} style={{ background: 'var(--ok-bg)' }}>
-                    <td>
-                      <b className="block truncate">{c.call_ref}</b>
-                      <small className="block truncate text-ink-muted">now</small>
-                    </td>
-                    <td>
-                      <CallerCell call={c} />
-                    </td>
-                    <td className="overflow-hidden">
-                      {c.language ? <LanguageBadge language={c.language} /> : <span className="text-[12.5px] text-ink-muted">choosing…</span>}
-                    </td>
-                    <td className="overflow-hidden">
-                      <span className="pill ok dotted">Live</span>
-                    </td>
-                    <td className="text-ink-muted">—</td>
-                    <td className="text-ink-muted">—</td>
-                    <td className="text-ink-muted">—</td>
-                    <td className="text-right">
-                      <Link to="/calls/$id" params={{ id: String(c.id) }} className="btn sm whitespace-nowrap !border-ok !bg-ok !text-white">
-                        <span className="dot" /> Watch live
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
                 {calls.map((c) => (
-                  <tr key={c.id}>
+                  <tr
+                    key={c.id}
+                    className="call-row row-link"
+                    onClick={() => navigate({ to: '/calls/$id', params: { id: String(c.id) }, search: { from: 'calls' } })}
+                    title="Open this call: transcript and recording"
+                  >
                     <td>
-                      <b className="block truncate">{c.call_ref}</b>
-                      <small className="block truncate text-ink-muted" title={`${friendlyTime(c.started_at || c.created_at, true)} · ${formatLength(c.duration_seconds)}`}>
-                        {friendlyTime(c.started_at || c.created_at, true)}
-                      </small>
+                      <b className="flex items-center gap-1.5 truncate">
+                        {c.call_ref}
+                        {c.recording_url && (
+                          <span className="rec-badge" title="This call was recorded: open it to listen">
+                            Rec
+                          </span>
+                        )}
+                      </b>
+                      <small className="block text-ink-soft">{friendlyTime(c.started_at || c.created_at, true)}</small>
+                      <small className="block text-ink-muted">{formatLength(c.duration_seconds)}</small>
                     </td>
                     <td>
                       <CallerCell call={c} />
@@ -182,20 +222,23 @@ export function CallsPage() {
                     <td className="overflow-hidden">
                       <LanguageBadge language={c.language} />
                     </td>
-                    <td className="overflow-hidden" title={c.intent ? INTENT_LABELS[c.intent] || c.intent : undefined}>
+                    <td>
                       <IntentBadge intent={c.intent} />
+                      {c.outcome && <p className="mt-1.5 break-words text-[13px] text-ink-soft">{c.outcome}</p>}
                     </td>
-                    <td className="text-[13px] text-ink-soft">
-                      <MoreText text={c.outcome} limit={28} />
+                    <td>
+                      <BookingLink status={c.booking_status} callId={c.id} />
                     </td>
-                    <td className="overflow-hidden">
-                      <BookingBadge status={c.booking_status} />
-                    </td>
-                    <td className="text-[13px] text-ink-soft">
-                      <MoreText text={c.next_action} limit={18} />
-                    </td>
-                    <td className="text-right">
-                      <Link to="/calls/$id" params={{ id: String(c.id) }} className="btn sm">
+                    <td className="break-words text-[13px] text-ink-soft">{c.next_action || '—'}</td>
+                    <td>
+                      <Link
+                        to="/calls/$id"
+                        params={{ id: String(c.id) }}
+                        search={{ from: 'calls' }}
+                        className="btn sm"
+                        onClick={(e) => e.stopPropagation()}
+                        title={c.recording_url ? 'Transcript and recording' : 'Transcript'}
+                      >
                         View
                       </Link>
                     </td>
@@ -205,7 +248,7 @@ export function CallsPage() {
             </table>
           </div>
         )}
-        {total > 0 ? (
+        {total > 0 && (
           <Pagination
             paged={{
               page,
@@ -215,10 +258,8 @@ export function CallsPage() {
               from: (page - 1) * PAGE_SIZE + 1,
               to: Math.min(page * PAGE_SIZE, total),
             }}
-            noun={`calls ${RANGE_WORDS[range]}${live.length ? ` · ${live.length} live now` : ''}${isFetching ? ' · updating…' : ''}`.trim()}
+            noun={`calls ${RANGE_WORDS[range]}${isFetching ? ' · updating…' : ''}`.trim()}
           />
-        ) : (
-          live.length > 0 && <div className="border-t border-line px-4 py-2.5 text-[12.5px] text-ink-muted">{live.length} live now · no finished calls yet</div>
         )}
       </div>
     </div>
@@ -226,15 +267,16 @@ export function CallsPage() {
 }
 
 function CallerCell({ call }: { call: Call }) {
-  const name = callerName(call)
+  const name = callerName(call) || 'Unknown caller'
+  // The name heard on this call, when the saved patient name is spelled differently
+  const said = call.patient_saved_name && call.patient_name && call.patient_saved_name.toLowerCase() !== call.patient_name.toLowerCase() ? call.patient_name : null
   return (
-    <div className="who min-w-0">
-      <Avatar name={name || '?'} size={28} />
+    <div className="who min-w-0 !items-start">
+      <Avatar name={name} size={28} />
       <div className="min-w-0">
-        <b className="block truncate" title={name || undefined}>
-          {name || 'Unknown caller'}
-        </b>
-        <small className="block truncate">
+        <b className={`person-name ${name.length > 22 ? 'long' : ''}`}>{name}</b>
+        {said && <span className="said-as">Name said on the call: {said}</span>}
+        <small className="block break-words">
           {call.phone_number || 'No number'}
           {call.channel === 'browser' ? ' · test' : ''}
         </small>
