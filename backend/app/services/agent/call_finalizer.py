@@ -112,8 +112,10 @@ async def finalize_call(call_log_id: int, db: AsyncSession, transcript: str, dur
     # ---- The call record ----
     call.structured_summary = summary or None
     call.summary = summary.get("summary") or (None if spoke else "The caller did not speak.")
-    name = _clean_name(summary.get("caller_name")) or (appointments[0].patient_name if appointments else None)
-    name = _clean_name(name) or call.patient_name
+    # The name on the appointment was read back and confirmed with the caller during the call, so it wins over
+    # the after-call summary (which may pick the caller's own name when they booked for a family member)
+    booked_name = _clean_name(appointments[0].patient_name) if appointments else None
+    name = booked_name or _clean_name(summary.get("caller_name")) or _clean_name(call.patient_name)
     call.patient_name = name
     chosen_language = call.language  # set during the call by SET_LANGUAGE or the saved-language greeting
     if summary.get("language") in LANGUAGES and not call.language:
