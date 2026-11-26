@@ -5,6 +5,7 @@ import { usePatients } from '../hooks/usePatients'
 import { useAuthStore } from '../store/authStore'
 import { useThemeStore, resolvedMode } from '../store/themeStore'
 import { openPalette } from '../lib/nav'
+import { markRestore, type BackTarget } from '../lib/backNav'
 import { NotificationBell } from './NotificationBell'
 
 /* ------------------------------------------------------------------ */
@@ -24,7 +25,7 @@ export function PageHeader({
   title: ReactNode
   subtitle?: ReactNode
   actions?: ReactNode
-  back?: { to: string; label: string }
+  back?: BackTarget
 }) {
   return (
     <>
@@ -52,7 +53,13 @@ export function PageHeader({
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-[13.5px] text-ink-muted">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             {back && (
-              <Link to={back.to} className="btn sm no-print">
+              <Link
+                to={back.to}
+                params={back.params as never}
+                className="btn sm no-print"
+                // Going back to a list brings it back as it was left (tab, filters, page, scroll)
+                onClick={() => markRestore(back.to)}
+              >
                 <Icon name="arrowLeft" className="h-3.5 w-3.5" /> {back.label}
               </Link>
             )}

@@ -21,6 +21,7 @@ from app.config import get_settings
 from app.models.call_log import CallLog, CallTurn
 from app.services.agent.claude_service import stream_conversation
 from app.services.voice.audio_utils import encode_mulaw_for_twilio
+from app.services.voice.call_recorder import CallRecorder
 from app.services.voice.sarvam_tts_service import SarvamTTSService
 from app.services.voice.stt_service import DeepgramStream
 
@@ -33,26 +34,27 @@ SAMPLE_RATE = 8000
 BARGE_IN_MIN_WORDS = 2
 # Max tokens per reply. Replies are short, but one reply can also carry hidden tokens (an appointment
 # request) and the [[END_CALL]] at the very end, which must never be cut off.
-REPLY_MAX_TOKENS = 500
+# Telugu and Hindi script use several times more tokens than English for the same sentence.
+REPLY_MAX_TOKENS = 1200
 
 # Lines the system says by itself (silence, very long call), in the call's language
 STILL_THERE_LINES = {
     "en": "Are you still there?",
     "hi": "क्या आप अभी लाइन पर हैं?",
-    "te": "మీరు ఇంకా లైన్‌లో ఉన్నారా?",
+    "te": "హలో, మీరు లైన్‌లో ఉన్నారా?",
 }
 SILENCE_GOODBYE_LINES = {
     "en": "I'll end the call now. Thank you for calling. Goodbye!",
     "hi": "मैं अब call समाप्त कर रही हूँ। call करने के लिए धन्यवाद। नमस्ते!",
-    "te": "నేను ఇప్పుడు call ముగిస్తున్నాను. call చేసినందుకు ధన్యవాదాలు.",
+    "te": "మీ నుంచి ఏమీ వినిపించట్లేదు, అందుకే call పెట్టేస్తున్నాను. Thank you, నమస్కారం!",
 }
 LONG_CALL_GOODBYE_LINES = {
     "en": "I'm sorry, we have been on the call for a long time. Our clinic team will call you back if you need more help. Goodbye!",
     "hi": "माफ़ कीजिए, call काफ़ी लंबी हो गई है। अगर और मदद चाहिए तो हमारी clinic team आपको वापस call करेगी। नमस्ते!",
-    "te": "క్షమించండి, call చాలా సేపు అయింది. ఇంకా సహాయం కావాలంటే మా clinic team మీకు తిరిగి call చేస్తారు. ధన్యవాదాలు.",
+    "te": "Sorry అండి, call చాలా సేపు అయింది. ఇంకా ఏమైనా help కావాలంటే మా clinic team మీకు call చేస్తారు. నమస్కారం!",
 }
 # A reply that clearly says goodbye ends the call even if the model forgot [[END_CALL]]
-GOODBYE_RE = re.compile(r"\b(good\s?-?bye|bye)\b|अलविदा|नमस्ते\s*[।!.]?\s*$|వీడ్కోలు|సెలవు", re.IGNORECASE)
+GOODBYE_RE = re.compile(r"\b(good\s?-?bye|bye)\b|अलविदा|नमस्ते\s*[।!.]?\s*$|నమస్కారం\s*[!.]?\s*$|వీడ్కోలు|సెలవు", re.IGNORECASE)
 
 
 def looks_like_goodbye(text: str) -> bool:
@@ -61,7 +63,12 @@ def looks_like_goodbye(text: str) -> bool:
     return bool(text) and not text.endswith("?") and bool(GOODBYE_RE.search(text))
 # Marks a reply the caller talked over, in the history the model sees
 CUT_OFF_MARK = " …(cut off: the caller started speaking)"
-FALLBACK_REPLY = "Sorry, could you say that again?"
+# Said when a reply had nothing to say aloud, in the call's language (never English in a Telugu/Hindi call)
+FALLBACK_REPLIES = {
+    "en": "Sorry, could you say that again?",
+    "hi": "माफ़ कीजिए, एक बार फिर बताएँगे?",
+    "te": "Sorry, సరిగ్గా వినపడలేదు. ఇంకోసారి చెప్తారా?",
+}
 
 
 class CallSession:
@@ -107,6 +114,8 @@ class CallSession:
         # The call's id, kept as a plain number so saving a turn never needs the database to re-read the call
         self.call_id: Optional[int] = None
         self.db: Optional[AsyncSession] = None
+        # Set when this call is recorded (both sides go into one file; see call_recorder.py)
+        self.recorder: Optional[CallRecorder] = None
 
     # ---------- Hooks for subclasses (CallAgentSession) ----------
 
@@ -154,11 +163,16 @@ class CallSession:
             except Exception:
                 return
         now = self._now()
-        self._play_until = max(self._play_until, now) + len(mulaw_bytes) / SAMPLE_RATE
+        plays_at = max(self._play_until, now)
+        self._play_until = plays_at + len(mulaw_bytes) / SAMPLE_RATE
+        if self.recorder:
+            self.recorder.add_agent(mulaw_bytes, plays_at)
 
     async def clear_caller_audio(self) -> None:
         """Barge-in: drop the agent audio the caller hasn't heard yet."""
         self._play_until = 0.0
+        if self.recorder:
+            self.recorder.cut_agent(self._now())
         if not self.stream_sid:
             return
         async with self._send_lock:
@@ -334,8 +348,8 @@ class CallSession:
                     # The reply had nothing to say aloud (e.g. only a hidden token): never leave dead air
                     logger.warning(f"[{self.call_sid}] Reply had no spoken text; asking the caller to repeat")
                     started = started or datetime.utcnow()
-                    spoken.append(FALLBACK_REPLY)
-                    await self._say(FALLBACK_REPLY, is_current)
+                    spoken.append(self._line(FALLBACK_REPLIES))
+                    await self._say(spoken[-1], is_current)
                 if spoken and not end_call and looks_like_goodbye(spoken[-1]):
                     # The agent said goodbye but forgot [[END_CALL]]: end the call anyway
                     logger.info(f"[{self.call_sid}] Reply ends with a goodbye but no [[END_CALL]]; ending the call")

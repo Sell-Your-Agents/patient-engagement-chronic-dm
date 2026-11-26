@@ -1,19 +1,26 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { usePatients } from '../hooks/usePatients'
 import { INTENT_LABELS, LANGUAGE_LABELS } from '../hooks/useCalls'
 import { PageHeader, Avatar, EmptyState, ErrorState, TableSkeleton, Pagination, paginate, friendlyTime, formatDate, utcDate } from '../components/ui'
 import { PatientFormModal } from '../components/PatientForm'
 import { Icon } from '../components/Icon'
+import { useListState, useScrollMemory } from '../lib/backNav'
 
 export function PatientListPage() {
   const navigate = useNavigate()
-  const [q, setQ] = useState('')
-  const [term, setTerm] = useState('')
-  const [page, setPage] = useState(1)
+  // Search and page: kept while a patient is open, so "All patients" brings the list back as it was
+  const { state: view, set, restored } = useListState('/patients', { q: '', page: 1 })
+  const { q, page } = view
+  const setQ = (v: string) => set('q', v)
+  const setPage = (v: number) => set('page', v)
+  const [term, setTerm] = useState(q.trim())
+  const lastQ = useRef(q)
   const [adding, setAdding] = useState(false)
 
   useEffect(() => {
+    if (lastQ.current === q) return
+    lastQ.current = q
     const t = window.setTimeout(() => {
       setTerm(q.trim())
       setPage(1)
@@ -22,6 +29,7 @@ export function PatientListPage() {
   }, [q])
 
   const { data, isLoading, error, refetch } = usePatients(term)
+  useScrollMemory('/patients', restored, !!data)
   const list = data || []
   const paged = paginate(list, page, setPage, 20)
 
@@ -56,10 +64,10 @@ export function PatientListPage() {
                 <tr>
                   <th>Patient</th>
                   <th>Language</th>
-                  <th className="text-center">Calls</th>
+                  <th>Calls</th>
                   <th>Last call</th>
-                  <th className="text-center">Open appointments</th>
-                  <th className="text-right">Details</th>
+                  <th>Open appointments</th>
+                  <th>Details</th>
                 </tr>
               </thead>
               <tbody>
@@ -77,14 +85,14 @@ export function PatientListPage() {
                       </div>
                     </td>
                     <td>{LANGUAGE_LABELS[p.preferred_language] || p.preferred_language}</td>
-                    <td className="text-center font-bold">{p.call_count}</td>
+                    <td className="font-bold">{p.call_count}</td>
                     <td className="whitespace-nowrap">
                       {p.last_call_at ? friendlyTime(p.last_call_at, true) : '—'}
                       {p.last_call_intent && <small className="block text-ink-muted">{INTENT_LABELS[p.last_call_intent] || p.last_call_intent}</small>}
                     </td>
-                    <td className="text-center">{p.open_appointments ? <span className="pill violet">{p.open_appointments}</span> : '—'}</td>
-                    <td className="text-right">
-                      <Link to="/patients/$id" params={{ id: String(p.id) }} className="btn !px-5">
+                    <td>{p.open_appointments ? <span className="pill violet">{p.open_appointments}</span> : '—'}</td>
+                    <td>
+                      <Link to="/patients/$id" params={{ id: String(p.id) }} search={{ from: 'patients' }} className="btn !px-5">
                         View
                         <Icon name="chevronRight" className="h-4 w-4" />
                       </Link>

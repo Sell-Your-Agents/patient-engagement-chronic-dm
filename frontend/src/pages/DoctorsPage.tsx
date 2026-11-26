@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { useDoctors, useSaveDoctor, type Doctor, type DoctorInput } from '../hooks/useClinic'
 import { useAppointments } from '../hooks/useAppointments'
 import { PageHeader, EmptyState, Loader, ErrorState, Avatar, Modal, Spinner } from '../components/ui'
-import { WEEKDAYS, hoursLabel, localISODate, mondayIndex } from '../components/clinic'
+import { WEEKDAYS, appointmentList, hoursLabel, mondayIndex } from '../components/clinic'
 import { toast, errorText } from '../components/toast'
 import { Icon } from '../components/Icon'
 
@@ -19,7 +19,8 @@ function daysLabel(days: number[]) {
 
 export function DoctorsPage() {
   const { data: doctors, isLoading, error, refetch } = useDoctors()
-  const { data: upcoming } = useAppointments({ date_from: localISODate(new Date()) })
+  // Same data and rule as the Appointments page, so the numbers on a card match what its button opens
+  const { data: appointments } = useAppointments()
   const [filter, setFilter] = useState<Filter>('all')
   const [editing, setEditing] = useState<Doctor | 'new' | null>(null)
 
@@ -30,14 +31,34 @@ export function DoctorsPage() {
   const onDuty = (d: Doctor) => d.is_active && d.working_days.includes(today)
   const all = doctors || []
   const list = all.filter((d) => (filter === 'all' ? true : filter === 'on' ? onDuty(d) : !onDuty(d)))
-  const booked = (id: number) =>
-    (upcoming || []).filter((a) => a.doctor_id === id && ['pending', 'confirmed', 'cancel_requested'].includes(a.status)).length
+  const booked = (id: number) => {
+    const mine = (appointments || []).filter((a) => a.doctor_id === id)
+    return {
+      pending: mine.filter((a) => appointmentList(a) === 'pending').length,
+      upcoming: mine.filter((a) => appointmentList(a) === 'upcoming').length,
+    }
+  }
+
+  // Pending requests where the caller did not name a doctor: not on any card, but counted on Appointments
+  const noDoctor = (appointments || []).filter((a) => !a.doctor_id && appointmentList(a) === 'pending').length
 
   return (
     <div>
       <PageHeader
         title="Doctors"
-        subtitle={`${all.filter(onDuty).length} on duty today · ${all.length} doctors · patients come any time within a doctor's working hours`}
+        subtitle={
+          <>
+            {`${all.filter(onDuty).length} on duty today · ${all.length} doctors · patients come any time within a doctor's working hours`}
+            {noDoctor > 0 && (
+              <>
+                {' · '}
+                <Link to="/appointments" search={{ from: 'doctors' }} className="font-bold text-warn hover:underline" title="Pending requests where no doctor was chosen yet. Open Appointments and pick a doctor when you confirm.">
+                  {noDoctor} pending with no doctor chosen
+                </Link>
+              </>
+            )}
+          </>
+        }
         actions={
           <div className="flex flex-wrap items-center gap-2">
           <div className="tabs">
@@ -84,7 +105,7 @@ function nextWorkingDay(days: number[], today: number) {
   return '—'
 }
 
-function DoctorCard({ doctor, duty, today, booked, onEdit }: { doctor: Doctor; duty: boolean; today: number; booked: number; onEdit: () => void }) {
+function DoctorCard({ doctor, duty, today, booked, onEdit }: { doctor: Doctor; duty: boolean; today: number; booked: { pending: number; upcoming: number }; onEdit: () => void }) {
   const hours = hoursLabel(doctor.start_time, doctor.end_time)
 
   return (
@@ -132,10 +153,12 @@ function DoctorCard({ doctor, duty, today, booked, onEdit }: { doctor: Doctor; d
             </>
           )}
         </span>
-        <span className="text-[12.5px] text-ink-muted">{booked} upcoming</span>
+        <span className="text-[12.5px] text-ink-muted" title="Same counts as the Pending and Upcoming lists on the Appointments page">
+          <b className="text-warn">{booked.pending}</b> pending · <b className="text-ok">{booked.upcoming}</b> upcoming
+        </span>
       </div>
       <div className="flex gap-2">
-        <Link to="/appointments" search={{ doctor: doctor.id }} className="btn sm p flex-1">
+        <Link to="/appointments" search={{ doctor: doctor.id, from: 'doctors' }} className="btn sm p flex-1">
           Appointments
         </Link>
         <button className="btn sm" onClick={onEdit}>

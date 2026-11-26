@@ -79,8 +79,10 @@ async def stream_conversation(
             try:
                 final = await stream.get_final_message()
                 if final.stop_reason == "max_tokens":
+                    text_out = "".join(getattr(b, "text", "") for b in final.content)
                     logger.warning(
-                        f"Reply was cut off at the {max_tokens}-token limit; the end of it (and any [[END_CALL]]) was lost"
+                        f"Reply was cut off at the {max_tokens}-token limit; the end of it (and any [[END_CALL]]) was lost. "
+                        f"It began: {text_out[:400]!r}"
                     )
             except Exception:
                 pass

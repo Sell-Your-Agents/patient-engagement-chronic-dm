@@ -1,4 +1,5 @@
 import logging
+from logging.handlers import RotatingFileHandler
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -21,7 +22,8 @@ logging.basicConfig(
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        # Rotates at 20 MB and keeps 5 old files, so the log never fills the disk
+        RotatingFileHandler(LOG_FILE, maxBytes=20 * 1024 * 1024, backupCount=5, encoding="utf-8"),
     ],
 )
 

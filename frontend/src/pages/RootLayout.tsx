@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useNavigate, useLocation } from "@tanstack/react-router";
 import { useAuthStore } from "../store/authStore";
 import { useThemeStore } from "../store/themeStore";
-import { useFollowUps } from "../hooks/useFollowUps";
+import { countFollowUpRows, useFollowUps } from "../hooks/useFollowUps";
 import { useAppointments } from "../hooks/useAppointments";
 import { useClinicInfo, useDoctors } from "../hooks/useClinic";
 import { usePatients } from "../hooks/usePatients";
@@ -101,16 +101,14 @@ function AppShell() {
   const { data: info } = useClinicInfo();
   const { data: followUps } = useFollowUps("pending");
   const { data: pendingAppts } = useAppointments({ status: "pending" });
-  const { data: cancelAppts } = useAppointments({ status: "cancel_requested" });
   const urgentFollowUps = (followUps || []).some(
     (f) => f.priority === "urgent",
   );
   const badges: Record<Badge, number> = {
-    // Appointment tasks are counted on Appointments (pending requests + cancel requests)
-    followups: (followUps || []).filter(
-      (f) => f.kind !== "confirm_appointment" && f.kind !== "cancel_request",
-    ).length,
-    appointments: (pendingAppts || []).length + (cancelAppts || []).length,
+    // Same number as the "To call back" tab (one per call) and the dashboard card
+    followups: countFollowUpRows(followUps || []),
+    // Same as the Pending chip on Appointments (cancel requests are counted on Follow-ups)
+    appointments: (pendingAppts || []).length,
   };
 
   const setMini = (v: boolean) => {

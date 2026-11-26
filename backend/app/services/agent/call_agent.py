@@ -25,7 +25,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -70,7 +70,8 @@ from app.services.scheduling.appointment_service import (
 from app.services.scheduling.callback_service import create_follow_up
 from app.services.voice.audio_utils import decode_twilio_payload
 from app.services.voice.stt_service import DeepgramStream
-from app.services.voice.telephony import can_transfer, start_call_recording, transfer_call
+from app.services.voice.call_recorder import CallRecorder
+from app.services.voice.telephony import can_transfer, transfer_call
 from app.services.voice.twilio_service import CallSession
 
 logger = logging.getLogger(__name__)
@@ -504,6 +505,16 @@ class CallAgentSession(CallSession):
         await self._new_follow_up(kind, {}, reason)
 
 
+async def save_recording_url(db: AsyncSession, call_id: int) -> None:
+    """Point the call record at its recording (played to signed-in staff via GET /api/calls/{id}/recording)."""
+    try:
+        await db.execute(update(CallLog).where(CallLog.id == call_id).values(recording_url=f"/api/calls/{call_id}/recording"))
+        await db.commit()
+    except Exception as exc:
+        logger.error(f"Could not save the recording link of call #{call_id}: {exc}")
+        await db.rollback()
+
+
 async def run_call_stream(websocket: WebSocket, call_sid: str, db: AsyncSession, accept: bool = True) -> None:
     """Handle the media-stream websocket for a call.
 
@@ -563,7 +574,9 @@ async def run_call_stream(websocket: WebSocket, call_sid: str, db: AsyncSession,
                 call.stream_sid = session.stream_sid
                 logger.info(f"[{call_sid}] Stream started: {session.stream_sid}")
                 if is_recorded(call):
-                    asyncio.create_task(start_call_recording(call.call_sid))
+                    # Recorded on our own server: works for phone calls and browser test calls alike
+                    session.recorder = CallRecorder(session._now())
+                    logger.info(f"[{call_sid}] Recording this call")
                 await session.add_turn("assistant", context.greeting)
                 asyncio.create_task(session.speak_parts(
                     [(text, LANGUAGE_DIGITS.get(lang, "3")) for text, lang in context.greeting_parts]
@@ -571,15 +584,18 @@ async def run_call_stream(websocket: WebSocket, call_sid: str, db: AsyncSession,
                 # From now on: "Are you still there?" after silence, and a maximum call length
                 session.start_watchdog()
             elif event == "media":
+                audio = decode_twilio_payload(data["media"]["payload"])
+                if session.recorder:
+                    session.recorder.add_caller(audio, session._now())
                 if session.deepgram_stt:
-                    await session.deepgram_stt.send_audio(decode_twilio_payload(data["media"]["payload"]))
+                    await session.deepgram_stt.send_audio(audio)
             elif event == "stop":
                 logger.info(f"[{call_sid}] Stream stopped")
                 break
 
-    except WebSocketDisconnect:
-        # The caller hung up (or the browser tab closed) without a "stop" event: a normal end
-        logger.info(f"[{call_sid}] Media stream disconnected")
+    except WebSocketDisconnect as exc:
+        # The connection closed without a "stop" event: a phone hang-up, a closed tab or a dropped network
+        logger.info(f"[{call_sid}] Media stream disconnected (code {exc.code})")
     except Exception as exc:
         logger.error(f"[{call_sid}] Call stream error: {exc}", exc_info=True)
     finally:
@@ -592,12 +608,16 @@ async def run_call_stream(websocket: WebSocket, call_sid: str, db: AsyncSession,
             transcript = session.transcript_text
             duration_seconds = int((datetime.utcnow() - session.started_at).total_seconds())
             await session.close()
+            recording = await session.recorder.save(session.call.id) if session.recorder else None
             try:
                 await finalize_call(session.call.id, db, transcript, duration_seconds)
             except Exception as exc:
                 logger.error(f"[{call_sid}] Finalize error: {exc}", exc_info=True)
                 # Never leave the call looking live because the summary step failed
                 await close_call_now(db, call_id=session.call.id)
+            logger.info(f"[{call_sid}] Call ended after {duration_seconds}s")
+            if recording:
+                await save_recording_url(db, session.call.id)
         else:
             # Setup failed before the session existed: close the call record anyway
             await close_call_now(db, call_sid=call_sid)

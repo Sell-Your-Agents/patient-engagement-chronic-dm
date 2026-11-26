@@ -20,6 +20,7 @@ from app.models.callback_schedule import (
     PRIORITY_URGENT,
     FollowUp,
 )
+from app.models.patient import Patient
 from app.models.user import User
 from app.routers.clinic import normalize_phone
 from app.services.agent.context_shared import lookup_caller
@@ -49,9 +50,20 @@ class FollowUpResponse(BaseModel):
     staff_notes: Optional[str]
     completed_at: Optional[datetime]
     created_at: datetime
+    # The name saved on the patient record (patient_name is the name as heard on the call)
+    patient_saved_name: Optional[str] = None
 
 
-def follow_up_out(task: FollowUp) -> FollowUpResponse:
+async def saved_patient_names(db: AsyncSession, patient_ids) -> dict:
+    """{patient id: name on the patient record}, in one query."""
+    ids = {i for i in patient_ids if i}
+    if not ids:
+        return {}
+    rows = await db.execute(select(Patient.id, Patient.name).where(Patient.id.in_(ids)))
+    return {pid: name for pid, name in rows.all()}
+
+
+def follow_up_out(task: FollowUp, saved_name: Optional[str] = None) -> FollowUpResponse:
     return FollowUpResponse(
         id=task.id,
         kind=task.kind,
@@ -71,6 +83,7 @@ def follow_up_out(task: FollowUp) -> FollowUpResponse:
         staff_notes=task.staff_notes,
         completed_at=task.completed_at,
         created_at=task.created_at,
+        patient_saved_name=saved_name,
     )
 
 
@@ -93,7 +106,8 @@ async def list_follow_ups(
     tasks = list(result.scalars().all())
     rank = {PRIORITY_URGENT: 0, PRIORITY_HIGH: 1}
     pending = sorted((t for t in tasks if t.status == FOLLOWUP_PENDING), key=lambda t: (rank.get(t.priority, 2), t.created_at))
-    return [follow_up_out(t) for t in pending + [t for t in tasks if t.status != FOLLOWUP_PENDING]]
+    names = await saved_patient_names(db, [t.patient_id for t in tasks])
+    return [follow_up_out(t, names.get(t.patient_id)) for t in pending + [t for t in tasks if t.status != FOLLOWUP_PENDING]]
 
 
 class FollowUpCreate(BaseModel):

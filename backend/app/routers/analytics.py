@@ -87,17 +87,21 @@ async def dashboard(
     total_calls = await count(select(func.count(CallLog.id)))
     live_calls = await count(select(func.count(CallLog.id)).where(CallLog.status == "in-progress"))
     pending_appointments = await count(select(func.count(Appointment.id)).where(Appointment.status == STATUS_PENDING))
+    # Same rule as the Upcoming chip on Appointments: confirmed, visit day today or later
     confirmed_upcoming = await count(
         select(func.count(Appointment.id)).where(
             Appointment.status == STATUS_CONFIRMED,
-            Appointment.start_at >= _local(now_utc).replace(tzinfo=None),
+            Appointment.start_at >= _local(now_utc).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None),
         )
     )
     requests_period = await count(select(func.count(Appointment.id)).where(Appointment.created_at >= since_utc))
-    pending_follow_ups = await count(select(func.count(FollowUp.id)).where(FollowUp.status == FOLLOWUP_PENDING))
-    urgent_follow_ups = await count(
-        select(func.count(FollowUp.id)).where(FollowUp.status == FOLLOWUP_PENDING, FollowUp.priority == PRIORITY_URGENT)
-    )
+    # Counted like the Follow-ups page: one row per call (all tasks from the same call count once)
+    open_rows = (
+        await db.execute(select(FollowUp.id, FollowUp.call_log_id, FollowUp.priority).where(FollowUp.status == FOLLOWUP_PENDING))
+    ).all()
+    row_key = lambda fid, call_id: f"call-{call_id}" if call_id is not None else f"fu-{fid}"  # noqa: E731
+    pending_follow_ups = len({row_key(f, c) for f, c, _ in open_rows})
+    urgent_follow_ups = len({row_key(f, c) for f, c, p in open_rows if p == PRIORITY_URGENT})
     by_kind_rows = (
         await db.execute(
             select(FollowUp.kind, func.count(FollowUp.id))

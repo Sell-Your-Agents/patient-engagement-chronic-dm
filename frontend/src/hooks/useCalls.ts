@@ -31,6 +31,8 @@ export interface Call {
   ended_at: string | null
   duration_seconds: number | null
   created_at: string
+  /** Set when the call was recorded (staff play it via apiClient.callRecording) */
+  recording_url?: string | null
 }
 
 export interface CallTurn {
@@ -42,7 +44,6 @@ export interface CallTurn {
 export interface CallDetail extends Call {
   transcript: string | null
   structured_summary: Record<string, unknown> | null
-  recording_url: string | null
   turns: CallTurn[]
   linked: {
     id: number
@@ -66,6 +67,8 @@ export interface CallSearch {
   patient_id?: number
   date_from?: string
   date_to?: string
+  /** Leave out calls still in progress */
+  finished_only?: boolean
 }
 
 export interface CallPage {

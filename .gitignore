@@ -47,3 +47,6 @@ out/
 .DS_Store
 .env.local
 .env.*.local
+
+# Call recordings (patient audio): never commit
+backend/recordings/

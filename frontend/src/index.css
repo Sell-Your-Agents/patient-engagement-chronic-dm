@@ -55,6 +55,8 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { min-height: 100%; }
+/* Always keep room for the scrollbar, so short and long pages are the same width (headers do not re-wrap) */
+html { scrollbar-gutter: stable; }
 body {
   background: var(--bg); color: var(--ink);
   font: 14px/1.45 var(--font);
@@ -527,3 +529,136 @@ table.t.fu .who { align-items: flex-start; }
 .fu-when a:hover { text-decoration: underline; }
 table.t.fu tr.fu-closed .fu-reason, table.t.fu tr.fu-closed .who b, table.t.fu tr.fu-closed .fu-when span { color: var(--ink-2); }
 table.t.fu tr.fu-closed .fu-prio { opacity: 0.7; }
+
+/* ---------- Appointments: rows that open their notes ---------- */
+.call-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 2px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 700; color: var(--accent-ink); background: var(--accent-bg); border: 1px solid var(--accent-line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.call-chip:hover { border-color: var(--accent); }
+.t tr.appt-open > td { background: var(--accent-bg); border-bottom-color: transparent; }
+.t tr.appt-open > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.t tr.appt-notes-row > td { padding: 0 14px 14px; background: var(--accent-bg); }
+.appt-notes { background: var(--card); border: 1px solid var(--accent-line); border-radius: 12px; }
+.t tr.appt-row > td { vertical-align: top; }
+.t tr.appt-row:hover > td { background: var(--card-2); }
+.t tr.appt-row.appt-open:hover > td { background: var(--accent-bg); }
+
+/* Call Records: marks a recorded call */
+.rec-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 900; letter-spacing: .04em; color: var(--bad); background: var(--bad-bg); border-radius: 99px; padding: 1px 7px; flex-shrink: 0; }
+.rec-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* Call Records: the Filters button and its panel */
+.filter-count { min-width: 18px; height: 18px; border-radius: 99px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 900; display: inline-grid; place-items: center; padding: 0 5px; }
+.filter-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; width: 340px; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--lift); }
+
+/* Call page: recording player and transcript lines in one panel */
+.player-play { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; flex-shrink: 0; }
+.player-play:hover { background: var(--accent-2); }
+.player-bar { accent-color: var(--accent); height: 6px; cursor: pointer; }
+.tline { display: grid; grid-template-columns: 46px 70px minmax(0, 1fr); gap: 8px; padding: 7px 8px; border-radius: 8px; font-size: 13.8px; line-height: 1.5; }
+.tline .ts { color: var(--accent); font-weight: 900; font-size: 12px; padding-top: 2px; font-variant-numeric: tabular-nums; }
+.tline .who { font-weight: 900; font-size: 12px; color: var(--ink-3); padding-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tline.pt .who { color: var(--accent-ink); }
+.tline.cursor-pointer:hover { background: var(--card-2); }
+.tline.now, .tline.now:hover { background: var(--warn-bg); }
+.tline.now .ts::before { content: '▶ '; }
+.t tr.call-row > td { vertical-align: top; }
+
+/* ---------- Appointments: one row of coloured list chips (count + filter) ---------- */
+.glance { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip-stat { display: flex; align-items: center; gap: 10px; padding: 7px 14px 7px 8px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); text-align: left; transition: border-color 0.15s, box-shadow 0.15s; }
+.chip-stat:hover { border-color: var(--accent-line); }
+.chip-stat.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.chip-stat .num { min-width: 30px; height: 30px; padding: 0 6px; border-radius: 8px; display: grid; place-items: center; font-weight: 900; font-size: 15px; font-variant-numeric: tabular-nums; }
+.chip-stat b { display: block; font-size: 13px; font-weight: 900; line-height: 1.2; }
+.chip-stat small { display: block; color: var(--ink-3); font-size: 11.5px; line-height: 1.3; }
+.t-warn { background: var(--warn-bg); color: var(--warn); }
+.t-bad { background: var(--bad-bg); color: var(--bad); }
+.t-ok { background: var(--ok-bg); color: var(--ok); }
+.t-info { background: var(--info-bg); color: var(--info); }
+.t-acc { background: var(--accent-bg); color: var(--accent-ink); }
+.t-mute { background: var(--mute-bg); color: var(--mute); }
+
+/* Names that wrap inside their column; long ones a little smaller. The name heard on the call shows under the saved name. */
+.person-name { display: block; font-weight: 900; font-size: 14px; line-height: 1.3; overflow-wrap: anywhere; }
+.person-name.long { font-size: 13px; }
+.said-as { display: block; margin-top: 2px; font-size: 11.5px; font-style: italic; color: var(--ink-3); overflow-wrap: anywhere; }
+.clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.btn.dfill { background: var(--bad); border-color: var(--bad); color: #fff; }
+.btn.dfill:hover { background: color-mix(in srgb, var(--bad) 88%, #000); color: #fff; }
+.btn.okfill { background: var(--ok); border-color: var(--ok); color: #fff; }
+.btn.okfill:hover { background: color-mix(in srgb, var(--ok) 88%, #000); color: #fff; }
+.t tr.row-flash > td { animation: row-flash 2.2s ease; }
+@keyframes row-flash { 0%, 45% { background: var(--warn-bg); } 100% { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .t tr.row-flash > td { animation: none; } }
+
+/* Opened appointment notes: details + call button on top, the story of the call across the full width below */
+.appt-notes-top { display: grid; grid-template-columns: minmax(0, 1fr) 250px; }
+.appt-notes-aside { padding: 16px; border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.call-btn { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--accent-line); background: var(--accent-bg); color: var(--accent-ink); }
+.call-btn:hover { border-color: var(--accent); }
+.call-btn b { font-weight: 900; font-size: 13.5px; }
+.call-btn small { color: var(--ink-3); font-size: 12px; }
+.appt-story { padding: 14px 16px 16px; border-top: 1px solid var(--line); }
+.appt-story p { font-size: 14px; line-height: 1.65; color: var(--ink-2); white-space: pre-line; overflow-wrap: anywhere; }
+@media (max-width: 860px) {
+  .appt-notes-top { grid-template-columns: 1fr; }
+  .appt-notes-aside { border-left: 0; border-top: 1px solid var(--line); }
+}
+
+/* Follow-ups: buttons side by side */
+.row-acts { display: flex; flex-wrap: nowrap; justify-content: flex-start; gap: 6px; }
+
+/* Call page: waveform of the recording (played part in the accent colour; click to jump) */
+.wave { position: relative; display: flex; align-items: center; gap: 2px; height: 56px; cursor: pointer; user-select: none; touch-action: none; }
+.wave i { flex: 1 1 0; min-width: 1px; border-radius: 2px; background: var(--line); transition: background 0.1s; }
+.wave i.on { background: var(--accent); }
+.wave:hover i.hover { background: var(--accent-line); }
+.wave .wave-cursor { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent-ink); border-radius: 2px; pointer-events: none; }
+.wave.loading i { animation: wave-pulse 1.2s ease-in-out infinite; }
+@keyframes wave-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .wave.loading i { animation: none; } }
+
+/* Transcript as lyrics while playing: the current line stands out, the rest steps back */
+.lyrics.playing .tline { opacity: 0.55; transition: opacity 0.25s; }
+.lyrics.playing .tline.now { opacity: 1; }
+.tline.now { box-shadow: inset 3px 0 0 var(--warn); }
+.tline.now > span:last-child { font-weight: 700; color: var(--ink); }
+
+/* Call booking badge that opens the appointment */
+/* A button-like pill: never clipped (wraps if the column is narrow), outlined, lifts on hover */
+.booking-link { display: inline-flex; max-width: 100%; border-radius: 99px; }
+.booking-link .pill { cursor: pointer; white-space: normal; text-align: left; padding: 4px 10px; box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent) inset; transition: box-shadow 0.15s, transform 0.15s; }
+.booking-link:hover .pill { box-shadow: 0 0 0 1.5px currentColor inset; transform: translateY(-1px); }
+.who b.person-name { white-space: normal; }
+
+/* Appointments: the list chips share the full row width equally (no gap at the end) */
+.glance.glance-fill { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); width: 100%; }
+.glance.glance-fill .chip-stat { min-width: 0; }
+.glance.glance-fill .chip-stat > span:last-child { min-width: 0; }
+.glance.glance-fill .chip-stat b, .glance.glance-fill .chip-stat small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1100px) { .glance.glance-fill { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .glance.glance-fill { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Clickable table rows (Call Records): the whole row opens the call */
+.t tr.row-link { cursor: pointer; }
+.t tr.row-link:hover > td { background: var(--card-2); }
+
+/* Appointments: the doctor filter reads clearly; when one doctor is chosen it is highlighted */
+select.field.doctor-pick { color: var(--ink); font-weight: 800; }
+/* Chosen doctor: just the name in dark bold text with a thin accent border; no blue fill */
+select.field.doctor-pick.on { color: var(--ink); font-weight: 900; border-color: var(--accent-line); }
+/* The open list always looks normal (it does not take the box's colours) */
+select.field.doctor-pick option { color: var(--ink); background-color: var(--card); font-weight: 400; }
+
+/* Dashboard: last five calls, each a full-width clickable row */
+.recent-call { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 10px; text-align: left; }
+.recent-call + .recent-call { border-top: 1px solid var(--line-2); }
+.recent-call:hover { background: var(--card-2); }
+
+/* Every table: headings and contents start at the left edge of their column (one rule for all pages) */
+table.t th, table.t td { text-align: left !important; }
+
+/* "Showing only <patient>  ✕ Clear" above a list filtered to one patient */
+.patient-filter { display: inline-flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border-radius: 99px; border: 1px solid var(--accent-line); background: var(--accent-bg); font-size: 13px; }
+.patient-filter b { font-weight: 900; color: var(--ink); }
+.patient-filter button { padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 800; color: var(--accent-ink); background: var(--card); border: 1px solid var(--accent-line); }
+.patient-filter button:hover { border-color: var(--accent); }

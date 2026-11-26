@@ -241,7 +241,7 @@ export function CallAgentPage() {
                   setRecordTouched(true);
                 }}
               />
-              Say the recording notice (test only, nothing is recorded)
+              Record this call (the caller hears the recording notice)
             </label>
 
             {error && (
@@ -318,6 +318,7 @@ export function CallAgentPage() {
                   <Link
                     to="/calls/$id"
                     params={{ id: String(logEntry.id) }}
+                    search={{ from: 'call-agent' }}
                     className="font-bold text-brand-700 hover:underline"
                   >
                     Open {logEntry.call_ref} in Call Records
@@ -428,6 +429,7 @@ export function CallAgentPage() {
                   <Link
                     to="/calls/$id"
                     params={{ id: String(logEntry.id) }}
+                    search={{ from: 'call-agent' }}
                     className="inline-flex items-center gap-1 font-bold text-brand-700 hover:underline"
                   >
                     Open in Call Records{" "}

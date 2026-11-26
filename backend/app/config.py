@@ -49,9 +49,11 @@ class Settings(BaseSettings):
     silence_hangup_seconds: int = 8
     max_call_minutes: int = 15
 
-    # Record phone calls. When on, the agent's opening line says so.
-    # Browser test calls choose for themselves on the "Call the Agent" page.
+    # Record phone calls on our own server (services/voice/call_recorder.py). When on, the agent's
+    # opening line says so. Browser test calls choose for themselves on the "Call the Agent" page.
     call_recording_enabled: bool = False
+    # Folder for the recordings (one WAV per call, about 1 MB per minute). Relative = inside backend/.
+    recordings_dir: str = "recordings"
 
     # AI services
     anthropic_api_key: str = ""

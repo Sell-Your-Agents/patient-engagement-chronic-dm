@@ -13,6 +13,7 @@ import { DoctorsPage } from './pages/DoctorsPage'
 import { CallAgentPage } from './pages/CallAgentPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { ROUTER_BASEPATH } from './lib/paths'
+import { parseFrom, type From } from './lib/backNav'
 
 // Root route
 const rootRoute = new RootRoute({
@@ -47,6 +48,8 @@ const patientDetailRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/patients/$id',
   component: PatientDetailPage,
+  // from: the page the patient was opened from (its back button returns there)
+  validateSearch: (s: Record<string, unknown>): { from?: From } => (parseFrom(s.from) ? { from: parseFrom(s.from) } : {}),
 })
 
 // Clinic knowledge base (services, FAQs, policies the agent may share)
@@ -61,6 +64,15 @@ const followUpsRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/follow-ups',
   component: FollowUpsPage,
+  // patient: show only this patient's follow-ups; from: the page that link was on (a back button returns there)
+  validateSearch: (s: Record<string, unknown>): { patient?: number; from?: From } => {
+    const out: { patient?: number; from?: From } = {}
+    const n = Number(s.patient)
+    if (Number.isFinite(n) && n > 0) out.patient = n
+    const from = parseFrom(s.from)
+    if (from) out.from = from
+    return out
+  },
 })
 
 // Appointments
@@ -68,9 +80,17 @@ const appointmentListRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/appointments',
   component: AppointmentsPage,
-  validateSearch: (s: Record<string, unknown>): { doctor?: number } => {
-    const n = Number(s.doctor)
-    return Number.isFinite(n) && n > 0 ? { doctor: n } : {}
+  // doctor: filter by doctor; open: open this appointment's notes; call: open the appointment recorded on this call;
+  // from: the page that link was on (a back button returns there)
+  validateSearch: (s: Record<string, unknown>): { doctor?: number; patient?: number; open?: number; call?: number; from?: From } => {
+    const out: { doctor?: number; patient?: number; open?: number; call?: number; from?: From } = {}
+    const from = parseFrom(s.from)
+    if (from) out.from = from
+    for (const k of ['doctor', 'patient', 'open', 'call'] as const) {
+      const n = Number(s[k])
+      if (Number.isFinite(n) && n > 0) out[k] = n
+    }
+    return out
   },
 })
 
@@ -86,6 +106,8 @@ const callDetailRoute = new Route({
   getParentRoute: () => rootRoute,
   path: '/calls/$id',
   component: CallDetailPage,
+  // from: the page the call was opened from (its back button returns there)
+  validateSearch: (s: Record<string, unknown>): { from?: From } => (parseFrom(s.from) ? { from: parseFrom(s.from) } : {}),
 })
 
 // Doctors

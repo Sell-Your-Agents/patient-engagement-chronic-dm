@@ -219,6 +219,7 @@ class ApiClient {
     patient_id?: number
     date_from?: string
     date_to?: string
+    finished_only?: boolean
   }) {
     const response = await this.client.get('/calls/', { params })
     return response.data
@@ -237,6 +238,12 @@ class ApiClient {
   async getCall(id: number) {
     const response = await this.client.get(`/calls/${id}`)
     return response.data
+  }
+
+  /** The call's recording as audio (signed-in staff only, so it is fetched with the login token). */
+  async callRecording(id: number): Promise<Blob> {
+    const response = await this.client.get(`/calls/${id}/recording`, { responseType: 'blob', timeout: 60000 })
+    return response.data as Blob
   }
 
   // Follow-ups (staff callbacks)
