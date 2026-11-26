@@ -96,7 +96,7 @@ TRANSCRIPT ("ASSISTANT" is the AI agent, "USER" is the caller; the call may be i
 
 Return only a JSON object with exactly these fields (null when something does not apply). Write every text value in English, translating if the call was in Hindi or Telugu:
 {{
-  "caller_name": "the caller's or patient's full name as given, or null",
+  "caller_name": "the PATIENT's full name (the person the appointment or request is for) as the caller finally confirmed it (if they corrected it, use the corrected name), in its usual English spelling; null if no name was given",
   "contact_number": "the number they gave for contact, digits only, or null if they agreed to use the number they called from",
   "language": "en|hi|te (the language most of the call was in)",
   "intent": "appointment_booking|appointment_change|doctor_enquiry|clinic_info|missed_call_callback|human_assistance|emergency|other",

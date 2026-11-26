@@ -23,7 +23,10 @@ from typing import Callable, Coroutine, Dict, List, Optional
 
 import websockets
 import websockets.exceptions  # explicit: not loaded by "import websockets" alone in v13
+from urllib.parse import quote
+
 from app.config import get_settings
+from app.services.agent.indian_name_matcher import STT_KEYTERMS
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -53,6 +56,9 @@ class DeepgramStream:
         self._last_update_text = ""  # last Flux Update text sent as an interim (barge-in signal)
         self._tasks: List[asyncio.Task] = []
         self._turn_buffer: List[str] = []  # Nova-3 is_final segments of the current turn
+        # Boost common Indian names (Flux only: Nova-3 regional models answer in native script).
+        # Turned off for this stream if Deepgram refuses the connection with them.
+        self._use_keyterms = True
 
     def _dispatch(self, transcript: str, is_final: bool) -> None:
         if self.on_transcript:
@@ -96,6 +102,8 @@ class DeepgramStream:
                 deepgram_ws_url = f"{base_url}&language_hint={language}&language_hint=en"
             else:
                 deepgram_ws_url = base_url
+            if self._use_keyterms:
+                deepgram_ws_url += "".join(f"&keyterm={quote(term)}" for term in STT_KEYTERMS)
         else:
             # Nova-3 v1 for regional languages
             deepgram_ws_url = (
@@ -127,6 +135,10 @@ class DeepgramStream:
                 break
             except Exception as exc:
                 logger.error("STT connection failed (attempt %d/%d): %s", attempt, max_retries, exc)
+                if self._use_keyterms and self.get_config()["api_version"] == "v2":
+                    # Never lose the call over the name boost: try again without it
+                    logger.warning("Retrying STT without name key terms")
+                    self._use_keyterms = False
                 if attempt == max_retries:
                     raise
                 await asyncio.sleep(0.5 * attempt)

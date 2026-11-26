@@ -54,6 +54,7 @@ from app.services.agent.call_context import (
     build_call_context,
 )
 from app.services.agent.call_finalizer import finalize_call
+from app.services.agent.indian_name_matcher import asked_for_name, name_matcher
 from app.services.agent.context_shared import (
     LANGUAGE_DIGITS,
     LISTEN_BEFORE_CHOICE_DIGIT,
@@ -124,6 +125,8 @@ class CallAgentSession(CallSession):
         self._questions: set = set()
         self._transfer_pending = False
         self._stt_switch: Optional[asyncio.Task] = None
+        # Likely Indian names for a misheard name in the caller's last reply (only for the next reply)
+        self._name_hint: Optional[str] = None
         self.base_prompt = context.system_prompt
         self.set_prompt(context.system_prompt)
 
@@ -145,6 +148,8 @@ class CallAgentSession(CallSession):
             )
         if self.language:
             prompt += f"\nCALL LANGUAGE: the caller chose {self.language}. Speak only in that language.\n"
+        if self._name_hint:
+            prompt += f"\n{self._name_hint}\n"
         self.system_prompt = prompt
 
     def _remember(self, key: str, line: str) -> None:
@@ -162,6 +167,26 @@ class CallAgentSession(CallSession):
     def on_new_turn(self) -> None:
         # A token left unfinished by an interrupted reply must not swallow the next reply's speech
         self._token_buffer = ""
+
+    async def handle_transcript(self, text: str, is_final: bool) -> None:
+        if is_final and text:
+            self._update_name_hint(text)
+        await super().handle_transcript(text, is_final)
+
+    def _update_name_hint(self, text: str) -> None:
+        """If the agent just asked for a name, look for a misheard Indian name in the caller's reply."""
+        last_agent = next((t["content"] for t in reversed(self.conversation_history) if t["role"] == "assistant"), "")
+        hint = None
+        if asked_for_name(last_agent):
+            try:
+                hint = name_matcher.build_llm_name_hint(text)
+            except Exception as exc:
+                logger.warning(f"[{self.call_sid}] Name check failed: {exc}")
+        if hint:
+            logger.info(f"[{self.call_sid}] {hint[:160]}")
+        if hint != self._name_hint:
+            self._name_hint = hint
+            self.set_prompt(self.base_prompt)
 
     async def flush_agent_text(self) -> str:
         """End of a reply: speak any text held back waiting for a token that never closed."""
@@ -323,8 +348,24 @@ class CallAgentSession(CallSession):
             return f"+91{digits}"
         return f"+{digits}"
 
+    def _known_name(self, fields: Dict[str, str]) -> Optional[str]:
+        """The name the agent wrote in the token (confirmed with the caller), else one already recorded in this call.
+
+        Never the name saved for this phone number: family members share phones, so it may be someone else.
+        """
+        candidates = (
+            fields.get("name"),
+            self.appointment.patient_name if self.appointment else None,
+            self.callback.patient_name if self.callback else None,
+            self.call.patient_name,
+        )
+        for name in candidates:
+            if name and name.strip().lower() not in PLACEHOLDER_VALUES:
+                return name.strip()
+        return None
+
     def _name(self, fields: Dict[str, str]) -> str:
-        return fields.get("name") or (self.patient.name if self.patient else "") or self.call.patient_name or "Unknown"
+        return self._known_name(fields) or "Unknown"
 
     def _visit(self, fields: Dict[str, str]) -> Optional[datetime]:
         """The visit day and rough time (visit=YYYY-MM-DDTHH:MM; "slot" accepted from older prompts)."""
@@ -367,6 +408,11 @@ class CallAgentSession(CallSession):
                 f"{outcome.slot_problem}. Tell the caller and agree a day and time within the doctor's hours]]"
             )
         self._pending_notes.append(note)
+        if appointment.patient_name == "Unknown":
+            self._pending_notes.append(
+                "[[NAME_MISSING: the request was saved without the patient's name. Ask for the patient's full name, "
+                "read it back to confirm, then write the APPOINTMENT_REQUEST token again with name=]]"
+            )
         self._remember(
             "APPOINTMENT_REQUEST:",
             f"#{appointment.id} for {appointment.patient_name} with {await self._doctor_name(appointment)}, "
@@ -467,7 +513,7 @@ class CallAgentSession(CallSession):
             priority=priority,
             call_log_id=self.call_id,
             patient_id=self.patient.id if self.patient else None,
-            patient_name=fields.get("name") or self.call.patient_name or (self.patient.name if self.patient else None),
+            patient_name=self._known_name(fields),
             phone_number=self._phone(fields),
             reason=reason,
         )
